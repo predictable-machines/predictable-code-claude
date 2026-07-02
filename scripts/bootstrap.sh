@@ -84,10 +84,13 @@ mkdir -p "$tmp" 2>/dev/null || true
 # authenticated with the distribution token (scoped to artifacts only). A 404 /
 # auth failure here can never expose source — the token has no source access.
 api="https://api.github.com/repos/$dist_repo/releases/tags/v$version"
-asset_url=$(curl -fsSL -H "Authorization: Bearer $token" \
-  -H "Accept: application/vnd.github+json" "$api" 2>/dev/null |
-  (pc_have_jq && jq -r --arg a "$asset" '.assets[]? | select(.name == $a) | .url' 2>/dev/null || true) |
-  head -1)
+asset_url=""
+if pc_have_jq; then
+  asset_url=$(curl -fsSL -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.github+json" "$api" 2>/dev/null |
+    jq -r --arg a "$asset" '.assets[]? | select(.name == $a) | .url' 2>/dev/null |
+    head -1)
+fi
 
 if [ -z "$asset_url" ]; then
   rm -rf "$tmp" 2>/dev/null || true
@@ -105,10 +108,13 @@ fi
 # (the format `make bundle` emits — one bare hash, no filename). Per-asset rather
 # than a shared SHA256SUMS so per-platform release uploads never race.
 sha_name="$asset.sha256"
-sha_url=$(curl -fsSL -H "Authorization: Bearer $token" \
-  -H "Accept: application/vnd.github+json" "$api" 2>/dev/null |
-  (pc_have_jq && jq -r --arg s "$sha_name" '.assets[]? | select(.name == $s) | .url' 2>/dev/null || true) |
-  head -1)
+sha_url=""
+if pc_have_jq; then
+  sha_url=$(curl -fsSL -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.github+json" "$api" 2>/dev/null |
+    jq -r --arg s "$sha_name" '.assets[]? | select(.name == $s) | .url' 2>/dev/null |
+    head -1)
+fi
 if [ -n "$sha_url" ]; then
   if curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" \
     -o "$tmp/$sha_name" "$sha_url" 2>/dev/null; then

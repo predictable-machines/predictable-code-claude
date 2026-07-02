@@ -65,7 +65,7 @@ echo "== no bundled agents =="
 if [ ! -d "$ROOT/agents" ]; then ok "no agents/ dir"; else bad "agents/ present — none should ship"; fi
 
 echo "== privacy: no Predictable source =="
-leak=$(cd "$ROOT" && git ls-files 2>/dev/null | grep -E '\.lean$|(^|/)lakefile|(^|/)packages/' || true)
+leak=$(git -C "$ROOT" ls-files 2>/dev/null | grep -E '\.lean$|(^|/)lakefile|(^|/)packages/' || true)
 if [ -z "$leak" ]; then
   ok "no .lean / lakefile / packages/ tracked"
 else
