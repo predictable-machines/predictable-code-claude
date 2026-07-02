@@ -22,6 +22,10 @@ Run it from the project root — `sync` uses the project's `.predictable-code/`
 directory and writes artifacts under `verification/`. Pass no flags: the plugin
 is zero-configuration (default engine, default paths, default concurrency).
 
+The plugin's `PreToolUse` hook **auto-approves this `predictable sync`** call, so
+it runs without a permission prompt. (Only `predictable sync` is auto-approved;
+`git push`/`git commit` still go through the pre-push gate.)
+
 ## Interpreting the verdict
 
 `sync --json` prints a `SyncResponse` as a single-key object `{ "<verdict>": { … } }`.

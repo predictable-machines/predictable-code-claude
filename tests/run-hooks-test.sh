@@ -78,6 +78,12 @@ STUB_FAIL=1 run_hook sync-gate.sh pre-tool-use-git-push.json
 [ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && ! contains "$OUT" 'deny'
 check "git push + sync infra error -> allow + systemMessage (never trap)" $? "exit $CODE out=$OUT"
 
+fresh_data
+run_hook sync-gate.sh pre-tool-use-predictable-sync.json
+rc=1
+contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
+check "predictable sync -> auto-allow (no permission prompt)" "$rc" "exit $CODE out=$OUT"
+
 echo "== sync-run =="
 
 fresh_data

@@ -49,6 +49,11 @@ session).
 
 Everything is advisory except the **pre-push/commit gate**, the one hard block.
 
+The `PreToolUse` hook also **auto-approves the plugin's own `predictable sync`**
+command, so the agent runs it without a permission prompt (only `sync` is
+auto-approved — `git push`/`git commit` still go through the gate, and every
+other command falls through to the host's normal permission flow).
+
 ## The verdict
 
 `sync --json` prints a `SyncResponse` as a single-key object; the key is the

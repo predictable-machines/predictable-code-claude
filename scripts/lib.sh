@@ -104,6 +104,15 @@ pc_emit_deny() { # reason
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
 }
 
+# PreToolUse allow decision — auto-approves a tool call so the host skips its
+# permission prompt. Used to silently approve the plugin's OWN `predictable sync`
+# (scoped tightly; everything else falls through to the host's normal flow).
+pc_emit_allow() { # reason
+  pc_have_jq || return 0
+  jq -n --arg r "$1" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: $r}}'
+}
+
 # --- Session progress metric (branding: issues found vs fixed) ---------------
 #
 # Every sync appends one record here so status-context and the Stop hook can

@@ -20,10 +20,15 @@ cat >"$stdin_json"
 cmd="$(jq -r '.tool_input.command // .toolInput.command // ""' "$stdin_json" 2>/dev/null || echo "")"
 rm -f "$stdin_json" 2>/dev/null || true
 
-# Only gate the version-control commands that publish work. Everything else on
-# the Bash tool passes straight through.
+# Gate the version-control commands that publish work; auto-approve the plugin's
+# OWN `predictable sync` so the agent never hits a permission prompt for it; let
+# everything else fall through to the host's normal permission flow.
 case "$cmd" in
-  *"git push"* | *"git commit"*) ;;
+  *"git push"* | *"git commit"*) ;; # fall through to the gate logic below
+  *predictable*" sync"*)
+    pc_emit_allow "Predictable Code: auto-approving the plugin's own 'predictable sync'."
+    exit 0
+    ;;
   *)
     exit 0
     ;;
