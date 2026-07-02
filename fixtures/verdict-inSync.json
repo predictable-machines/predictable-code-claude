@@ -1,7 +1,15 @@
 {
   "inSync": {
-    "requirementsProven": 12,
-    "requirementsRefuted": 0,
-    "message": "All requirements proven; code satisfies its specification."
+    "specsChecked": 3,
+    "requirementsVerified": 12,
+    "guidelinesVerified": 2,
+    "requirementsViolated": 0,
+    "requirementsUnknown": 0,
+    "guidelinesViolated": 0,
+    "theoremsTotal": 12,
+    "theoremsProved": 12,
+    "theoremsRefuted": 0,
+    "theoremsUnproved": 0,
+    "requirementsNeedingEars": 0
   }
 }

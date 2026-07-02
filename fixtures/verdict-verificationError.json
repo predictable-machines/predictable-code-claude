@@ -1,6 +1,11 @@
 {
   "verificationError": {
-    "stage": "translate",
-    "message": "Translation failed: could not resolve symbol in bank/Account.java."
+    "headline": "Verification project failed to compile (1 real, 1 sorry, 2 refuted).",
+    "realErrorCount": 1,
+    "sorryCount": 1,
+    "counterexampleCount": 2,
+    "untestableCount": 0,
+    "verifiedCount": 9,
+    "logFile": null
   }
 }

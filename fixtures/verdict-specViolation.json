@@ -1,14 +1,9 @@
 {
   "specViolation": {
-    "requirementsProven": 10,
-    "requirementsRefuted": 2,
-    "refuted": [
-      {
-        "requirement": "balance >= 0 after withdraw",
-        "function": "bank.Account.withdraw",
-        "counterexample": "balance = 50, amount = 100 -> balance = -50"
-      }
-    ],
-    "message": "2 requirements refuted."
+    "report": {
+      "refutedCount": 2
+    },
+    "specsChecked": 3,
+    "summary": "2 requirements refuted (future scaffolding — not yet produced by the sync pipeline)."
   }
 }

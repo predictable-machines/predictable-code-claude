@@ -57,8 +57,9 @@ STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
   run_hook sync-gate.sh pre-tool-use-git-push.json
 contains "$OUT" '"permissionDecision": "deny"'
 check "git push + verificationError -> deny JSON" $?
-[ "$CODE" -eq 2 ]
-check "git push + verificationError -> exit 2" $? "got exit $CODE"
+rc=1
+[ "$CODE" -eq 2 ] && rc=0
+check "git push + verificationError -> exit 2" "$rc" "got exit $CODE"
 
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" \
@@ -68,8 +69,9 @@ check "git push + inSync -> allow (exit 0, no deny)" $? "exit $CODE out=$OUT"
 
 fresh_data
 run_hook sync-gate.sh pre-tool-use-bash-noop.json
-[ "$CODE" -eq 0 ] && [ -z "$OUT" ]
-check "non-git Bash -> passthrough (exit 0, no output)" $? "exit $CODE out=$OUT"
+rc=1
+[ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
+check "non-git Bash -> passthrough (exit 0, no output)" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
 STUB_FAIL=1 run_hook sync-gate.sh pre-tool-use-git-push.json
@@ -81,14 +83,43 @@ echo "== sync-run =="
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh post-tool-use-write.json
-[ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ]
-check "PostToolUse(Write) clean -> exit 0, verdict persisted" $? "exit $CODE"
+[ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ] && contains "$OUT" 'Proven in sync'
+check "PostToolUse(Write) clean -> exit 0, verdict persisted, summary emitted" $? "exit $CODE out=$OUT"
 
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh post-tool-use-write.json
-[ "$CODE" -eq 0 ] && contains "$OUT" 'SPEC VIOLATION'
-check "PostToolUse(Write) regression -> surfaces verdict in additionalContext" $? "exit $CODE out=$OUT"
+[ "$CODE" -eq 0 ] && contains "$OUT" 'issue'
+check "PostToolUse(Write) with open issues -> summary in additionalContext" $? "exit $CODE out=$OUT"
+
+echo "== metric: issues found -> fixed (branding) =="
+
+fresh_data
+# Iteration 1: verificationError = 3 issues (1 real + 2 refuted).
+STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh post-tool-use-write.json
+contains "$OUT" 'issue' && ! contains "$OUT" 'Proven'
+check "iter1 (verificationError) -> reports open issues" $? "out=$OUT"
+
+# Iteration 2 at Stop: inSync = 0 issues -> closing summary crediting the fixes.
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+contains "$OUT" 'Proven in sync' && contains "$OUT" 'fixed all 3'
+check "iter2 (inSync) -> closing summary reports 3 issues fixed" $? "out=$OUT"
+
+run_hook status-context.sh user-prompt-submit.json
+contains "$OUT" 'Proven in sync' && contains "$OUT" 'fixed all 3'
+check "status-context surfaces the same session summary" $? "out=$OUT"
+
+hist_lines=$(wc -l <"$DATA/session-history.jsonl" 2>/dev/null | tr -d ' ')
+rc=1
+[ "$hist_lines" = "2" ] && rc=0
+check "session-history recorded 2 syncs" "$rc" "history=$(cat "$DATA/session-history.jsonl" 2>/dev/null)"
+
+# A fresh session (SessionStart:startup) resets the tally for the next run.
+run_hook status-context.sh session-start.json
+contains "$OUT" 'no sync' && [ ! -f "$DATA/session-history.jsonl" ]
+check "SessionStart:startup resets the session tally" $? "out=$OUT"
 
 echo "== status-context =="
 

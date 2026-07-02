@@ -27,30 +27,36 @@ project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
-run_sync() {
+run_sync() { # event
   # `sync --json` prints the SyncResponse to stdout; persist it atomically so a
-  # partial write never corrupts the verdict a later hook reads.
+  # partial write never corrupts the verdict a later hook reads, then record the
+  # outcome in the session history that feeds the "issues found vs fixed" metric.
   tmp="$verdict_file.tmp.$$"
   if ( cd "$project" 2>/dev/null && "$bin" sync --json ) >"$tmp" 2>/dev/null; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    pc_record_sync "$1" "$verdict_file"
   else
     rm -f "$tmp" 2>/dev/null || true
   fi
 }
 
 if [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ]; then
-  run_sync
+  run_sync "$event"
 else
   # Detach so the hook returns immediately; the fresh verdict lands for the next
-  # turn. nohup + `&` keeps it alive past hook teardown.
-  ( run_sync ) >/dev/null 2>&1 &
+  # turn. `&` keeps it alive past hook teardown.
+  ( run_sync "$event" ) >/dev/null 2>&1 &
 fi
 
 verdict="$(pc_verdict_name "$verdict_file")"
 pc_log "$event" "$matcher" "$verdict"
 
-if [ "$verdict" != "-" ] && [ "$verdict" != "inSync" ]; then
-  pc_emit_context "$event" "Predictable Code — last verdict: $(pc_verdict_summary "$verdict"). See verification/.analysis-results.json. A fresh \`predictable sync\` is running."
+# Surface the session progress — how many issues Predictable found and how many
+# Claude has fixed — as context (advisory; never blocks the turn). On Stop this
+# reads as the closing "proven in sync" summary once the code lands in sync.
+summary="$(pc_session_summary)"
+if [ -n "$summary" ]; then
+  pc_emit_context "$event" "$summary"
 fi
 
 rm -f "$stdin_json" 2>/dev/null || true

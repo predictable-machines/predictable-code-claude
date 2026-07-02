@@ -103,3 +103,80 @@ pc_emit_deny() { # reason
   jq -n --arg r "$1" \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
 }
+
+# --- Session progress metric (branding: issues found vs fixed) ---------------
+#
+# Every sync appends one record here so status-context and the Stop hook can
+# report "Predictable found N issues; Claude fixed M this session" — the
+# ground-truth story that Predictable made Claude's code better. One JSON object
+# per line; reset per session (status-context truncates it on SessionStart:startup).
+pc_session_history_file() { printf '%s/session-history.jsonl' "$(pc_data_dir)"; }
+
+pc_reset_session_history() { rm -f "$(pc_session_history_file)" 2>/dev/null || true; }
+
+# Actionable-issue count for a SyncResponse file, keyed on its verdict. Reads
+# the REAL result fields emitted by `sync --json` (Core.SpecSync.SyncResponse);
+# missing fields degrade to 0. verificationError = real build errors + refuted
+# contracts (counterexamples); inSync = residual refuted/violated (normally 0);
+# specViolation = best-effort from its report (future scaffolding — not yet
+# produced by the pipeline); inferSpecs/noCode are not "issues".
+pc_issue_count() { # verdict-file
+  if [ ! -f "$1" ] || ! pc_have_jq; then
+    printf '0'
+    return 0
+  fi
+  jq -r '
+    (keys[0]) as $v | (.[$v]) as $r
+    | if   $v == "inSync"            then (($r.theoremsRefuted // 0) + ($r.requirementsViolated // 0) + ($r.guidelinesViolated // 0))
+      elif $v == "verificationError" then (($r.realErrorCount // 0) + ($r.counterexampleCount // 0))
+      elif $v == "specViolation"     then (($r.report.refutedCount) // (($r.report.violations // []) | length))
+      else 0 end
+  ' "$1" 2>/dev/null || printf '0'
+}
+
+# Append one sync to the session history: {ts, event, verdict, issues}.
+pc_record_sync() { # event verdict-file
+  pc_have_jq || return 0
+  _pc_hist="$(pc_session_history_file)"
+  mkdir -p "$(pc_data_dir)" 2>/dev/null || true
+  _pc_vd="$(pc_verdict_name "$2")"
+  _pc_iss="$(pc_issue_count "$2")"
+  jq -nc --arg ts "$(pc_now)" --arg ev "$1" --arg vd "$_pc_vd" --argjson iss "${_pc_iss:-0}" \
+    '{ts: $ts, event: $ev, verdict: $vd, issues: $iss}' >>"$_pc_hist" 2>/dev/null || true
+}
+
+# Branded one-line summary of the session so far, computed from the history.
+# Empty when nothing has run yet (caller supplies the fallback). Headlines the
+# peak issue count (the worst point, ~ the initial generation) and how many
+# Claude has since resolved — the closing "proven in sync" line when it lands.
+pc_session_summary() {
+  _pc_hist="$(pc_session_history_file)"
+  { [ -f "$_pc_hist" ] && pc_have_jq; } || {
+    printf ''
+    return 0
+  }
+  jq -rs '
+    if length == 0 then "" else
+      (map(.issues) | max) as $peak
+      | (last.issues) as $cur
+      | (last.verdict) as $vd
+      | length as $iters
+      | ([.[] | select(.event == "sync-gate" and .verdict != "inSync")] | length) as $gate
+      | ($peak - $cur) as $fixed
+      | (if $vd == "inSync" and $peak > 0 then
+           "✓ Proven in sync — Predictable surfaced \($peak) issue(s) in the code this session; Claude fixed all \($peak) over \($iters) sync(s). Every checked requirement is now proven against its spec."
+         elif $vd == "inSync" then
+           "✓ Proven in sync — Predictable verified the code against its spec (\($iters) sync(s), no issues found)."
+         elif $vd == "inferSpecs" then
+           "Predictable: source found but no specs yet — verification is idle until specs exist."
+         elif $vd == "noCode" then
+           "Predictable: no source code detected to verify."
+         elif $fixed > 0 then
+           "Predictable: \($fixed) of \($peak) issue(s) fixed so far, \($cur) remaining, over \($iters) sync(s) — keep fixing until inSync."
+         else
+           "Predictable: \($cur) issue(s) open (\($iters) sync(s)). See verification/.analysis-results.json."
+         end)
+      + (if $gate > 0 then " · gate blocked \($gate) push(es) while out of sync." else "" end)
+    end
+  ' "$_pc_hist" 2>/dev/null || printf ''
+}

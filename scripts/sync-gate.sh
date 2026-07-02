@@ -41,6 +41,7 @@ if ! ( cd "$project" 2>/dev/null && "$bin" sync --json ) >"$tmp" 2>/dev/null; th
   exit 0
 fi
 mv "$tmp" "$verdict_file" 2>/dev/null || true
+pc_record_sync sync-gate "$verdict_file"
 
 verdict="$(pc_verdict_name "$verdict_file")"
 pc_log PreToolUse sync-gate "$verdict"

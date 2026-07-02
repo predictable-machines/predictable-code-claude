@@ -59,6 +59,22 @@ verdict:
   `verification/.analysis-results.json`).
 - `verificationError` — the project did not verify cleanly.
 
+## Progress & proof (the value it surfaces)
+
+Every `sync` is recorded in a per-session tally (reset each new session). As you
+work, the hooks inject the running story as context:
+
+- while fixing — `Predictable: 2 of 3 issue(s) fixed so far, 1 remaining`
+- when it lands — `✓ Proven in sync — Predictable surfaced N issue(s) in the code
+  this session; Claude fixed all N. Every checked requirement is now proven
+  against its spec.`
+
+The counts are ground truth from the SMT verdict (`verificationError` →
+real errors + refuted contracts; `inSync` → residual refutations), not
+heuristics — so "Claude fixed N issues Predictable caught, and the result is
+formally proven against its spec" is a claim you can stand behind. The raw
+timeline is in `$PLUGIN_DATA/session-history.jsonl` and `hook-events.log`.
+
 ## Layout
 
 ```
