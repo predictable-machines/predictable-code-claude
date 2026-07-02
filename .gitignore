@@ -1,0 +1,9 @@
+# Runtime bundle + hook state live in the host's plugin-data dir, never here.
+runtime/
+*.log
+last-verdict.json
+.ready
+.bootstrap.lock
+
+# OS / editor noise
+.DS_Store

@@ -1,0 +1,10 @@
+{
+  "session_id": "fixture-session",
+  "transcript_path": "/tmp/transcript.jsonl",
+  "cwd": "/tmp/predictable-code-java-reference",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ls -la src"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "predictable-code",
+  "description": "Spec-driven formal verification in the loop — SMT analysis, EARS requirements, and proof-gated edits via a single `predictable sync` command.",
+  "author": {
+    "name": "Predictable Machines",
+    "email": "dev@predictablemachines.com"
+  },
+  "homepage": "https://github.com/predictable-machines/predictable-code-claude",
+  "repository": "https://github.com/predictable-machines/predictable-code-claude",
+  "license": "Apache-2.0",
+  "keywords": [
+    "formal-verification",
+    "smt",
+    "lean",
+    "spec-driven",
+    "java",
+    "verification"
+  ]
+}

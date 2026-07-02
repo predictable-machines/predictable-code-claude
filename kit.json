@@ -1,0 +1,11 @@
+{
+  "runtimeVersion": "0.0.0-dev",
+  "distRepo": "predictable-machines/predictable-code-dist",
+  "assetPattern": "predictable-runtime-{version}-{platform}.tar.zst",
+  "platforms": [
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-x64",
+    "linux-arm64"
+  ]
+}

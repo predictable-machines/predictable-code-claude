@@ -1,0 +1,44 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh
+#
+# `predictable` wrapper. Every hook script and the `sync` skill invoke the CLI
+# through this so the downloaded runtime bundle is used with its environment
+# primed (z3 first on PATH, Lean toolchain pinned). Added to the Bash tool's PATH
+# by the plugin so `predictable sync` also works when the agent runs it directly.
+#
+# The bundle must be RELOCATABLE — no absolute paths baked in — so LEAN_SYSROOT /
+# LEAN_PATH are computed here at launch from the extracted location, mirroring
+# what DirectTranslate.lean / LakeBuild.lean already do inside the CLI.
+
+data_dir="${CLAUDE_PLUGIN_DATA:-${PLUGIN_DATA:-$HOME/.predictable-code-runtime}}"
+runtime="$data_dir/runtime"
+
+if [ -x "$runtime/bin/predictable" ]; then
+  # z3 (co-located in bin/) must win over any system z3 — the analysis golden is
+  # keyed to the pinned version — so the bundle bin/ goes first. The toolchain
+  # bin/ follows so `lake`/`lean` resolve for the generated verification project.
+  PATH="$runtime/bin:$runtime/toolchain/bin:$PATH"
+  export PATH
+  LEAN_SYSROOT="$runtime/toolchain"
+  export LEAN_SYSROOT
+  if [ -d "$runtime/workspace/.lake/build/lib/lean" ]; then
+    LEAN_PATH="$runtime/workspace/.lake/build/lib/lean${LEAN_PATH:+:$LEAN_PATH}"
+    export LEAN_PATH
+  fi
+  exec "$runtime/bin/predictable" "$@"
+fi
+
+# Dev / no-bundle fallback: a `predictable` already on PATH. Strip this wrapper's
+# own directory from PATH first so we resolve the *next* predictable, never
+# recurse into ourselves.
+self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
+stripped=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$self_dir" | paste -sd: -)
+fallback=$(PATH="$stripped" command -v predictable 2>/dev/null || true)
+if [ -n "$fallback" ]; then
+  exec "$fallback" "$@"
+fi
+
+printf 'predictable: no runtime bundle in %s and no predictable on PATH.\n' "$runtime" >&2
+printf 'Start a session so the SessionStart hook can install the runtime (needs PREDICTABLE_DIST_TOKEN),\n' >&2
+printf 'or put a dev predictable on PATH.\n' >&2
+exit 127

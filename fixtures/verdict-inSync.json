@@ -1,0 +1,7 @@
+{
+  "inSync": {
+    "requirementsProven": 12,
+    "requirementsRefuted": 0,
+    "message": "All requirements proven; code satisfies its specification."
+  }
+}

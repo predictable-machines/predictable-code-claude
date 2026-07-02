@@ -1,0 +1,6 @@
+{
+  "verificationError": {
+    "stage": "translate",
+    "message": "Translation failed: could not resolve symbol in bank/Account.java."
+  }
+}

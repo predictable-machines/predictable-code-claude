@@ -1,0 +1,16 @@
+{
+  "name": "predictable-machines",
+  "owner": {
+    "name": "Predictable Machines",
+    "email": "dev@predictablemachines.com"
+  },
+  "plugins": [
+    {
+      "name": "predictable-code",
+      "source": "./",
+      "description": "Spec-driven formal verification in the loop — SMT analysis, EARS requirements, proof-gated edits.",
+      "category": "quality",
+      "license": "Apache-2.0"
+    }
+  ]
+}

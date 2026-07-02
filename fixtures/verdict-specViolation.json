@@ -1,0 +1,14 @@
+{
+  "specViolation": {
+    "requirementsProven": 10,
+    "requirementsRefuted": 2,
+    "refuted": [
+      {
+        "requirement": "balance >= 0 after withdraw",
+        "function": "bank.Account.withdraw",
+        "counterexample": "balance = 50, amount = 100 -> balance = -50"
+      }
+    ],
+    "message": "2 requirements refuted."
+  }
+}

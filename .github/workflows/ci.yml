@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # L1 + L2: fast, key-free, bundle-free, source-free. Runs on every PR.
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck + jq
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+
+      - name: Lint (shellcheck)
+        run: make lint
+
+      - name: L2 — validate plugin surface + privacy
+        run: make test-plugin-validate
+
+      - name: L1 — hook contract tests
+        run: make test-plugin-hooks
+
+  # Privacy guard: fail the build if any Predictable source ever lands here.
+  no-source-leak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert no Predictable source is tracked
+        run: |
+          leak=$(git ls-files | grep -E '\.lean$|(^|/)lakefile|(^|/)packages/' || true)
+          if [ -n "$leak" ]; then
+            echo "::error::Predictable source leaked into the plugin repo:"
+            echo "$leak"
+            exit 1
+          fi
+          echo "No source-like files tracked."
