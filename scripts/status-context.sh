@@ -34,6 +34,8 @@ pc_log "$event" status-context "$verdict"
 summary="$(pc_session_summary)"
 if [ -n "$summary" ]; then
   pc_emit_context "$event" "$summary"
+elif ! pc_is_configured; then
+  pc_emit_context "$event" "Predictable Code is not set up in this project yet — run the /predictable-code:sync skill to configure it, then it verifies the code against its spec."
 elif [ "$verdict" = "-" ]; then
   pc_emit_context "$event" "Predictable Code: $(pc_verdict_summary "$verdict") to check this project against its spec."
 else

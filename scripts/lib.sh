@@ -36,6 +36,13 @@ pc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 pc_have_jq() { command -v jq >/dev/null 2>&1; }
 
+# `predictable init` writes `<project>/.predictable-code/project.json`. Until it
+# exists, `predictable sync` drops into an INTERACTIVE setup wizard (engine/mode
+# picker) that ignores `--json` and would hang a non-TTY hook — so every hook
+# that runs `sync` must guard on this and skip when the project isn't set up.
+pc_config_file() { printf '%s/.predictable-code/project.json' "$(pc_project_dir)"; }
+pc_is_configured() { [ -f "$(pc_config_file)" ]; }
+
 # Append one audit line: `<iso8601> <event> <matcher> <verdict>`. This is the
 # observable side effect the L5 integration tests assert on ("hooks fired"), so
 # it is best-effort but always attempted, even when jq is missing.

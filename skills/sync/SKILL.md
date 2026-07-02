@@ -11,24 +11,48 @@ prove/verify → diagnose) and returns a single verdict. There are no other verb
 
 ## How to run it
 
-Run:
+`predictable` must be on PATH — invoke it **directly**. Do NOT use
+`$CLAUDE_PLUGIN_ROOT/bin/predictable`: that variable is only set while hooks run,
+not in your shell, so it would expand to an empty path. The plugin's `PreToolUse`
+hook **auto-approves `predictable sync` and `predictable init`**, so they run
+without a permission prompt (`git push`/`git commit` still go through the gate).
+
+### 1. Ensure the project is set up (once per project)
+
+`predictable sync` needs the project initialized. If it isn't, `sync` launches an
+interactive setup wizard that **cannot** be driven from here — so always check
+first, from the project root:
+
+```sh
+test -f .predictable-code/project.json && echo configured || echo needs-setup
+```
+
+If it prints `needs-setup`, initialize it **non-interactively** (never run bare
+`predictable init` — that is interactive):
+
+1. **Choose the AI engine.** Default to **`claude`** (you are running inside
+   Claude Code). Ask the user first only if they might prefer `copilot` or
+   `opencode`, or if they say so.
+2. Run it, using the repository/folder name as the project name:
+
+   ```sh
+   predictable init "<project-name>" --adapter <engine> --accept-config-suggestions
+   ```
+
+   `--accept-config-suggestions` auto-accepts the detected source paths so no
+   prompt appears. Then confirm `.predictable-code/project.json` now exists.
+
+If setup reports a problem, or needs a choice you cannot safely infer, **ask the
+user** before continuing rather than guessing.
+
+### 2. Run sync
 
 ```sh
 predictable sync --json
 ```
 
-Invoke `predictable` **directly** (it must be on PATH). Do NOT use
-`$CLAUDE_PLUGIN_ROOT/bin/predictable` — that variable is only set while hooks
-run, not in your shell, so it would expand to an empty path. The hooks call the
-bundled wrapper themselves; you just run `predictable`.
-
-Run it from the project root — `sync` uses the project's `.predictable-code/`
-directory and writes artifacts under `verification/`. Pass no flags: the plugin
-is zero-configuration (default engine, default paths, default concurrency).
-
-The plugin's `PreToolUse` hook **auto-approves `predictable sync`**, so it runs
-without a permission prompt. (Only `predictable sync` is auto-approved;
-`git push`/`git commit` still go through the pre-push gate.)
+Run from the project root — `sync` uses `.predictable-code/` and writes artifacts
+under `verification/`. Pass no other flags (zero configuration).
 
 ## Interpreting the verdict
 

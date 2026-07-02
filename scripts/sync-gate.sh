@@ -25,8 +25,8 @@ rm -f "$stdin_json" 2>/dev/null || true
 # everything else fall through to the host's normal permission flow.
 case "$cmd" in
   *"git push"* | *"git commit"*) ;; # fall through to the gate logic below
-  *predictable*" sync"*)
-    pc_emit_allow "Predictable Code: auto-approving the plugin's own 'predictable sync'."
+  *predictable*" sync"* | *predictable*" init"*)
+    pc_emit_allow "Predictable Code: auto-approving the plugin's own 'predictable' setup/sync command."
     exit 0
     ;;
   *)
@@ -37,6 +37,15 @@ esac
 project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
+
+# Can't gate a project that isn't set up — running `sync` here would launch the
+# interactive setup wizard and hang. Allow the command with a notice instead of
+# blocking or hanging.
+if ! pc_is_configured; then
+  pc_log PreToolUse sync-gate not-configured
+  pc_emit_system_message "Predictable Code is not set up in this project; not gating this command. Run /predictable-code:sync to configure."
+  exit 0
+fi
 
 tmp="$verdict_file.tmp.$$"
 if ! ( cd "$project" 2>/dev/null && "$bin" sync --json ) >"$tmp" 2>/dev/null; then

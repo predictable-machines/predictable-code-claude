@@ -54,6 +54,17 @@ command, so the agent runs it without a permission prompt (only `sync` is
 auto-approved — `git push`/`git commit` still go through the gate, and every
 other command falls through to the host's normal permission flow).
 
+## First run in a project
+
+`predictable sync` needs the project initialized — otherwise it drops into an
+interactive setup wizard that can't be driven headlessly. The `sync` skill
+handles this: it checks for `.predictable-code/project.json` and, if missing,
+runs a one-time **non-interactive** setup —
+`predictable init "<name>" --adapter claude --accept-config-suggestions` — asking
+you which AI engine to use when it isn't obvious. Until the project is set up the
+hooks stay quiet (they advise running the skill instead of launching the wizard),
+so nothing ever hangs on a prompt.
+
 ## The verdict
 
 `sync --json` prints a `SyncResponse` as a single-key object; the key is the

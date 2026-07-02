@@ -27,6 +27,15 @@ project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
+# Never run `sync` before the project is set up — it would launch the interactive
+# setup wizard and hang this hook. Advise, don't act.
+if ! pc_is_configured; then
+  pc_log "$event" "$matcher" not-configured
+  pc_emit_context "$event" "Predictable Code is not set up in this project yet — run the /predictable-code:sync skill (it will configure it) before syncing."
+  rm -f "$stdin_json" 2>/dev/null || true
+  exit 0
+fi
+
 run_sync() { # event
   # `sync --json` prints the SyncResponse to stdout; persist it atomically so a
   # partial write never corrupts the verdict a later hook reads, then record the

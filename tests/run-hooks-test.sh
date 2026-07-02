@@ -17,7 +17,15 @@ trap 'rm -f "$ERRFILE"' EXIT
 fresh_data() {
   DATA=$(mktemp -d)
   export CLAUDE_PLUGIN_DATA="$DATA"
+  PROJ=$(mktemp -d)
+  export CLAUDE_PROJECT_DIR="$PROJ"
+  # Default to a CONFIGURED project so sync-running tests exercise the sync path.
+  # A test that wants the unconfigured path calls unconfigure.
+  mkdir -p "$PROJ/.predictable-code"
+  printf '{}' >"$PROJ/.predictable-code/project.json"
 }
+
+unconfigure() { rm -f "$CLAUDE_PROJECT_DIR/.predictable-code/project.json"; }
 
 # Run a hook script with a fixture on stdin. Sets OUT/CODE.
 run_hook() { # script fixture
@@ -83,6 +91,12 @@ run_hook sync-gate.sh pre-tool-use-predictable-sync.json
 rc=1
 contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
 check "predictable sync -> auto-allow (no permission prompt)" "$rc" "exit $CODE out=$OUT"
+
+fresh_data
+run_hook sync-gate.sh pre-tool-use-predictable-init.json
+rc=1
+contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
+check "predictable init -> auto-allow (setup runs without prompt)" "$rc" "exit $CODE out=$OUT"
 
 echo "== sync-run =="
 
@@ -151,9 +165,34 @@ check "SessionStart, no token -> clean systemMessage, exit 0" $? "exit $CODE out
 ! contains "$OUT" 'packages/Predictable' && ! contains "$OUT" '.lean'
 check "bootstrap failure output leaks no source" $? "out=$OUT"
 
+echo "== not-configured guard (no setup wizard, no hang) =="
+
+fresh_data
+unconfigure
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh post-tool-use-write.json
+rc=1
+[ "$CODE" -eq 0 ] && contains "$OUT" 'not set up' && [ ! -f "$DATA/last-verdict.json" ] && rc=0
+check "sync-run unconfigured -> skips sync, advises setup" "$rc" "exit $CODE out=$OUT"
+
+fresh_data
+unconfigure
+STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$OUT" 'deny' && rc=0
+check "sync-gate unconfigured -> allows (no gate, no hang)" "$rc" "exit $CODE out=$OUT"
+
+fresh_data
+unconfigure
+run_hook status-context.sh user-prompt-submit.json
+contains "$OUT" 'not set up'
+check "status-context unconfigured -> advises setup" $?
+
 echo "== side effects =="
-[ -f "$DATA/hook-events.log" ]
-check "hook-events.log written" $? "expected $DATA/hook-events.log"
+rc=1
+[ -f "$DATA/hook-events.log" ] && rc=0
+check "hook-events.log written" "$rc" "expected $DATA/hook-events.log"
 
 echo
 printf 'L1: %s passed, %s failed\n' "$pass" "$fail"
