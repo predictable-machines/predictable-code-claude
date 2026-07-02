@@ -101,16 +101,18 @@ if ! curl -fsSL -H "Authorization: Bearer $token" \
   fail_advisory "Predictable Code: runtime download failed (network or auth). Keeping any previously installed runtime."
 fi
 
-# Verify the checksum against the release's SHA256SUMS asset when available.
-sums_url=$(curl -fsSL -H "Authorization: Bearer $token" \
+# Verify the checksum against the per-asset `<asset>.sha256` sidecar when present
+# (the format `make bundle` emits — one bare hash, no filename). Per-asset rather
+# than a shared SHA256SUMS so per-platform release uploads never race.
+sha_name="$asset.sha256"
+sha_url=$(curl -fsSL -H "Authorization: Bearer $token" \
   -H "Accept: application/vnd.github+json" "$api" 2>/dev/null |
-  (pc_have_jq && jq -r '.assets[]? | select(.name == "SHA256SUMS") | .url' 2>/dev/null || true) |
+  (pc_have_jq && jq -r --arg s "$sha_name" '.assets[]? | select(.name == $s) | .url' 2>/dev/null || true) |
   head -1)
-if [ -n "$sums_url" ]; then
-  curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" \
-    -o "$tmp/SHA256SUMS" "$sums_url" 2>/dev/null || true
-  if [ -f "$tmp/SHA256SUMS" ]; then
-    expected=$(grep " $asset\$" "$tmp/SHA256SUMS" | awk '{print $1}' | head -1)
+if [ -n "$sha_url" ]; then
+  if curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" \
+    -o "$tmp/$sha_name" "$sha_url" 2>/dev/null; then
+    expected=$(awk '{print $1}' "$tmp/$sha_name" | head -1)
     actual=$(sha256sum "$tmp/$asset" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$tmp/$asset" | awk '{print $1}')
     if [ -n "$expected" ] && [ "$expected" != "$actual" ]; then
       rm -rf "$tmp" 2>/dev/null || true
