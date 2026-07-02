@@ -11,19 +11,23 @@ prove/verify → diagnose) and returns a single verdict. There are no other verb
 
 ## How to run it
 
-Invoke the bundled wrapper (it primes the runtime environment; falls back to a
-`predictable` on PATH in dev):
+Run:
 
 ```sh
-"$CLAUDE_PLUGIN_ROOT/bin/predictable" sync --json
+predictable sync --json
 ```
+
+Invoke `predictable` **directly** (it must be on PATH). Do NOT use
+`$CLAUDE_PLUGIN_ROOT/bin/predictable` — that variable is only set while hooks
+run, not in your shell, so it would expand to an empty path. The hooks call the
+bundled wrapper themselves; you just run `predictable`.
 
 Run it from the project root — `sync` uses the project's `.predictable-code/`
 directory and writes artifacts under `verification/`. Pass no flags: the plugin
 is zero-configuration (default engine, default paths, default concurrency).
 
-The plugin's `PreToolUse` hook **auto-approves this `predictable sync`** call, so
-it runs without a permission prompt. (Only `predictable sync` is auto-approved;
+The plugin's `PreToolUse` hook **auto-approves `predictable sync`**, so it runs
+without a permission prompt. (Only `predictable sync` is auto-approved;
 `git push`/`git commit` still go through the pre-push gate.)
 
 ## Interpreting the verdict
