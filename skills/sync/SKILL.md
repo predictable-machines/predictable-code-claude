@@ -77,6 +77,12 @@ After a run, inspect these under `<project>/verification/`:
 - `Code/*.lean` — the translated model.
 - `Code/.source-map.json` — maps each finding back to its source file + line range.
 
+**Inspect them with the Read / Glob / Grep tools, not `cat` / `find` / `ls` via
+Bash.** File reads through those tools don't trigger a Bash permission prompt, so
+the loop stays smooth; shelling out for the same thing makes the user approve
+each command. Likewise, read `sync`'s JSON from its own stdout directly — don't
+redirect it to a temp file and then `cat` the temp file back.
+
 Report the verdict to the user and, when it is not `inSync`, summarize the
 refuted requirement(s) and the counterexample, then propose a fix.
 
