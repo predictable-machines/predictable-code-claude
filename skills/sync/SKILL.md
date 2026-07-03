@@ -45,35 +45,40 @@ If it prints `needs-setup`, initialize it **non-interactively** (never run bare
 If setup reports a problem, or needs a choice you cannot safely infer, **ask the
 user** before continuing rather than guessing.
 
-### 2. Run sync — and narrate progress as it goes
+### 2. Run sync — and narrate progress with emojis
 
-`sync` takes minutes and `--json` prints **nothing** until it finishes, so don't
-block on it in silence. Run it in the **background** and report milestones to the
-user in short prose + emoji by reading its live log.
-
-Start it (from the project root), capturing the final JSON verdict:
+`sync` takes minutes and `--json` prints nothing until it finishes. Run it with
+the **Bash tool's background mode** (`run_in_background: true`) — this exact
+command, no other flags:
 
 ```sh
-predictable sync --json > "$TMPDIR/pc-sync-verdict.json" 2>/dev/null &
+predictable sync --json
 ```
 
+Do **NOT** append a shell `&`, and do **NOT** write a `until` / `while` / `sleep`
+wait-loop to wait for it — those are separate commands that trigger a permission
+prompt. Use the Bash tool's own background polling instead.
+
 While it runs, `sync` streams a log to `.predictable-code/logs/<date>/<hour>.log`
-(newest file). Poll the tail of that file every ~20–30s and post **one short
-line** per phase transition — e.g.:
+(newest file). **Read that log with the Read tool** (never `cat`/`tail` — the Read
+tool needs no permission) a few times, and after each phase post **one short
+milestone line** to the user. **Every line MUST start with its emoji — this is
+required:**
 
 - 🔄 Translating source → Lean…
 - 📋 Inferring specs — N found…
-- 🔍 Proving specs — X/N done…
+- 🔍 Proving specs — X/N…
 - 🧪 Analyzing functions…
+- ✅ Sync complete — reading the verdict…
 
-Log signals to key on: `Translation engine` / `direct-translate` (translating);
-`Inferring` / spec-inference lines (inferring); count `[SPEC-NNN] proving
-complete` lines against the spec total (proving X/N); `Scanning … Code for
-translated functions` (analyzing). Keep it to a handful of updates — inform, don't
-spam. Use the **Read** tool for the log (no Bash permission prompt).
+Log signals to key on: `Translation engine` / `direct-translate` → 🔄; inference
+lines → 📋; count `[SPEC-NNN] proving complete` vs the spec total → 🔍 X/N;
+`Scanning … Code for translated functions` → 🧪. Keep it to a handful — inform,
+don't spam.
 
-When the background job finishes, read `$TMPDIR/pc-sync-verdict.json` for the
-verdict and continue below. Pass no other flags (zero configuration).
+To finish: poll the background task's status/output with the Bash tool (not a
+shell loop). When it completes, its captured stdout **is** the `SyncResponse`
+JSON — parse it and continue below.
 
 ## Interpreting the verdict
 
