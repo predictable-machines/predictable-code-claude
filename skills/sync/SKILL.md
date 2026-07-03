@@ -130,6 +130,14 @@ fixes for the genuine ones. In `mechanical` mode (the default) these findings AR
 the result — don't wait for proving or treat their absence-of-proofs as a
 problem.
 
+**Do not read build-status meta-fields in `.analysis-results.json` as a
+pass/fail signal.** `buildSucceeded: false` does NOT mean "nothing was analyzed"
+or "the code couldn't be translated" — it usually just means the mechanical
+translation fell back to the LLM. What matters is the findings: use
+`findingsAffecting` / `findingsPotential` and the `.analysis-findings/` sidecars.
+If findings exist, Predictable analyzed the code — report them; never claim "0 of
+N functions processed" when `results` is non-empty.
+
 ## Progress the hooks surface
 
 As you edit and `sync` re-runs, the plugin tracks a per-session tally of issues
