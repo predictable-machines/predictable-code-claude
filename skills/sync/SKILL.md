@@ -64,31 +64,27 @@ command, no other flags:
 predictable sync --json
 ```
 
-Do **NOT** append a shell `&`, and do **NOT** write a `until` / `while` / `sleep`
-wait-loop to wait for it — those are separate commands that trigger a permission
-prompt. Use the Bash tool's own background polling instead.
+Do **NOT** append a shell `&`, and do **NOT** write a `sleep` / `until` / `while`
+wait-loop — the harness blocks foreground sleeps; use the Bash tool's own
+background polling to know when it finishes.
 
-While it runs, `sync` streams a log to `.predictable-code/logs/<date>/<hour>.log`
-(newest file). **Read that log with the Read tool** (never `cat`/`tail` — the Read
-tool needs no permission) a few times, and after each phase post **one short
-milestone line** to the user. **Every line MUST start with its emoji — this is
-required:**
+**Never read `.predictable-code/logs/**`.** That is Predictable's internal engine
+log; it is full of implementation detail (the engine, solver, intermediate build
+output) that is meaningless — and confusing — to the user, and it must never enter
+this conversation. Take progress ONLY from domain-level signals:
 
-- 🔄 Reading your code…
-- 📋 Deriving the spec — N requirements…
-- 🔍 Verifying requirements — X/N…
-- 🧪 Analyzing functions for faults…
-- ✅ Check complete — preparing the report…
+- 🔄 Reading your code… (emit right after you launch it)
+- 🧪 Verifying your code against its spec — this takes a few minutes…
+- optionally, once results start landing, count the files in
+  `.predictable-code/verification/.analysis-findings/` with the **Glob** tool and
+  post `🧪 Analyzed N functions so far…` — a COUNT only, never their names/contents
+- ✅ Check complete — preparing the report… (when the background task finishes)
 
-Map the log's internal markers to these lines but **never parrot the internals**
-(no Lean, no `SPEC-NNN`, no "proving"/"theorem", no build errors — see the rule at
-the top): `Translation engine` / `direct-translate` → 🔄; inference lines → 📋;
-count `[SPEC-NNN] proving complete` vs the spec total → 🔍 X/N; `Scanning … Code
-for translated functions` → 🧪. Keep it to a handful — inform, don't spam.
+Every line starts with its emoji. Keep it to a handful — inform, don't spam.
 
-To finish: poll the background task's status/output with the Bash tool (not a
-shell loop). When it completes, its captured stdout **is** the `SyncResponse`
-JSON — parse it and continue below.
+When the background task completes, its captured stdout **is** the `SyncResponse`
+JSON — parse it and continue below. Do not surface any internal error text a
+failed run might carry; translate to plain language (see the top rule).
 
 ## Interpreting the verdict
 
