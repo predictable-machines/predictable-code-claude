@@ -48,7 +48,7 @@ judge $? "plugin source is ./ (same repo, no git-subdir of source)" "marketplace
 
 echo "== hooks.json =="
 H="$ROOT/hooks/hooks.json"
-for ev in SessionStart UserPromptSubmit PostToolUse PreToolUse Stop; do
+for ev in SessionStart UserPromptSubmit PreToolUse Stop SubagentStop; do
   jq -e --arg e "$ev" '.hooks | has($e)' "$H" >/dev/null 2>&1
   judge $? "hook: $ev" "hook missing: $ev"
 done

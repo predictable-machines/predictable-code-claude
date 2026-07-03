@@ -77,6 +77,17 @@ Then, simply:
    `✅ Check complete`, then report per below. If the run failed, translate the
    problem to plain language — never surface internal / build / engine text.
 
+**Run only ONE check at a time.** `predictable sync` is exclusive per project —
+never start a second while one is still running (wait for the first to complete).
+
+### 3. Re-check after you change code
+
+The **Fix-issue** and **New-feature** flows edit code and then confirm the result.
+After you apply the edits, run `predictable sync --json` again **exactly as in
+step 2** (same background call, same short progress notes) and report the new
+verdict — did the issue you fixed disappear, and did anything else change? Editing
+does not auto-run a check; you drive it.
+
 ## Interpreting the verdict
 
 `sync --json` prints a `SyncResponse` as a single-key object `{ "<verdict>": { … } }`
@@ -140,8 +151,8 @@ N functions processed" when `results` is non-empty.
 
 ## Progress the hooks surface
 
-As you edit and `sync` re-runs, the plugin tracks a per-session tally of issues
-Predictable found versus how many you fixed, and injects it as context (e.g.
+As you re-run the check across a session, the plugin tracks a per-session tally of
+issues Predictable found versus how many you fixed, and injects it as context (e.g.
 "Predictable: 2 of 3 issue(s) fixed so far, 1 remaining"). When the code finally
 lands `inSync`, it surfaces a closing line like:
 

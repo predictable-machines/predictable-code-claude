@@ -1,15 +1,22 @@
 #!/usr/bin/env sh
 # shellcheck shell=sh
 #
-# Advisory sync hook (PostToolUse on source edits, Stop, SubagentStop).
+# Advisory sync hook (Stop, SubagentStop — turn-end verification).
 #
-# `predictable sync` is heavy, so on these hot-path events we DON'T block on it:
-# we kick it off in the background (writing its verdict to the shared
-# last-verdict file) and immediately surface the *previous* verdict as an advisory
-# (additionalContext on PostToolUse, systemMessage on Stop/SubagentStop — see
-# emit_advisory). The next turn's status-context picks up the fresh verdict.
-# Set PREDICTABLE_SYNC_FOREGROUND=1 to run synchronously (used by the L1 tests
-# and available for debugging).
+# `predictable sync` is heavy, so we DON'T block on it: we kick it off in the
+# background (writing its verdict to the shared last-verdict file) and immediately
+# surface the current session summary as an advisory (systemMessage on Stop/
+# SubagentStop — see emit_advisory). The next turn's status-context picks up the
+# fresh verdict.
+#
+# We NEVER launch a sync while another is already running (pc_sync_running). Edits
+# are NOT a trigger: the skill runs its OWN foreground `predictable sync --json`
+# after editing (the Fix-issue / New-feature flows), so an edit-triggered hook sync
+# would collide with it — two syncs on one project race the engine's setup-progress
+# watcher into a runaway (multi-GB stdout / pegged CPU). This hook only fills the
+# gap at turn end when nothing else synced.
+#
+# Set PREDICTABLE_SYNC_FOREGROUND=1 to run synchronously (used by the L1 tests).
 
 self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 # shellcheck source=scripts/lib.sh
@@ -18,12 +25,13 @@ self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 stdin_json=$(mktemp 2>/dev/null || echo "/tmp/pc-sync-run.$$")
 cat >"$stdin_json"
 event="$(pc_read_event "$stdin_json")"
-[ "$event" = "-" ] && event="PostToolUse"
+[ "$event" = "-" ] && event="Stop"
 
-# Route an advisory to the right output shape for this event. Only PostToolUse
-# accepts `hookSpecificOutput.additionalContext`; Stop/SubagentStop accept only
-# top-level fields, so their advisory (the closing "proven in sync" summary) goes
-# through `systemMessage`. Using additionalContext on Stop fails schema validation.
+# Route an advisory to the right output shape for this event. Stop/SubagentStop
+# (this hook's wired events) accept only top-level fields, so their advisory (the
+# closing "proven in sync" summary) goes through `systemMessage`; additionalContext
+# would fail schema validation there. The other branch is a fallback for any event
+# that does accept additionalContext.
 emit_advisory() { # message
   case "$event" in
     Stop | SubagentStop) pc_emit_system_message "$1" ;;
@@ -61,16 +69,25 @@ run_sync() { # event
   fi
 }
 
-if [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ]; then
-  run_sync "$event"
-else
-  # Detach so the hook returns immediately; the fresh verdict lands for the next
-  # turn. `&` keeps it alive past hook teardown.
-  ( run_sync "$event" ) >/dev/null 2>&1 &
-fi
+launch_sync() {
+  if [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ]; then
+    run_sync "$event"
+  else
+    # Detach so the hook returns immediately; the fresh verdict lands for the next
+    # turn. `&` keeps it alive past hook teardown.
+    ( run_sync "$event" ) >/dev/null 2>&1 &
+  fi
+}
 
-verdict="$(pc_verdict_name "$verdict_file")"
-pc_log "$event" "$matcher" "$verdict"
+# Never run two syncs at once on the same project (pc_sync_running). The skill
+# drives its own foreground `predictable sync --json`; when one is in flight this
+# hook skips and only reports — two concurrent syncs race the engine into a runaway.
+if pc_sync_running; then
+  pc_log "$event" "$matcher" skipped-running
+else
+  launch_sync
+  pc_log "$event" "$matcher" "$(pc_verdict_name "$verdict_file")"
+fi
 
 # Surface the session progress — how many issues Predictable found and how many
 # Claude has fixed — as context (advisory; never blocks the turn). On Stop this

@@ -43,9 +43,12 @@ session).
 | **Skill** `/predictable-code:sync` | Runs `predictable sync` and interprets the verdict + findings. |
 | **`SessionStart`** | Ensures the runtime is installed; injects the last verdict as context. |
 | **`UserPromptSubmit` / `PreCompact`** | Re-injects the last verdict so the agent always knows the sync state. |
-| **`PostToolUse`** (Write/Edit) | Kicks off an advisory `sync` in the background; surfaces the last verdict. |
 | **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks** the command unless the project is `inSync`. |
-| **`Stop` / `SubagentStop`** | Advisory `sync` so the agent keeps working toward an in-sync state. |
+| **`Stop` / `SubagentStop`** | Advisory turn-end `sync` (skipped if one is already running) so the agent keeps working toward an in-sync state. |
+
+Edits do **not** trigger a sync: the skill runs its own `predictable sync` after
+changing code, and two syncs on one project at once are never allowed — the hook
+skips when one is already in flight.
 
 Everything is advisory except the **pre-push/commit gate**, the one hard block.
 

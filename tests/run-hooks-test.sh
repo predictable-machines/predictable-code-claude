@@ -100,17 +100,18 @@ check "predictable init -> auto-allow (setup runs without prompt)" "$rc" "exit $
 
 echo "== sync-run =="
 
+# A non-Stop event exercises emit_advisory's additionalContext fallback branch.
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh post-tool-use-write.json
 [ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ] && contains "$OUT" 'Proven in sync'
-check "PostToolUse(Write) clean -> exit 0, verdict persisted, summary emitted" $? "exit $CODE out=$OUT"
+check "sync-run clean -> exit 0, verdict persisted, summary emitted" $? "exit $CODE out=$OUT"
 
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh post-tool-use-write.json
 [ "$CODE" -eq 0 ] && contains "$OUT" 'issue'
-check "PostToolUse(Write) with open issues -> summary in additionalContext" $? "exit $CODE out=$OUT"
+check "sync-run with open issues -> summary in additionalContext (fallback)" $? "exit $CODE out=$OUT"
 
 echo "== metric: issues found -> fixed (branding) =="
 
@@ -140,6 +141,27 @@ check "session-history recorded 2 syncs" "$rc" "history=$(cat "$DATA/session-his
 run_hook status-context.sh session-start.json
 contains "$OUT" 'no sync' && [ ! -f "$DATA/session-history.jsonl" ]
 check "SessionStart:startup resets the session tally" $? "out=$OUT"
+
+echo "== concurrency guard =="
+
+fresh_data
+# Simulate an in-flight `predictable sync` (argv0 spoofed via exec -a) so the
+# guard must skip rather than start a second, colliding sync.
+( exec -a "predictable sync --json" sleep 5 ) &
+FAKE=$!
+guard_i=0
+while [ "$guard_i" -lt 20 ] && ! pgrep -f 'predictable[^ ]* sync' >/dev/null 2>&1; do
+  sleep 0.1
+  guard_i=$((guard_i + 1))
+done
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+kill "$FAKE" 2>/dev/null
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -f "$DATA/session-history.jsonl" ] \
+  && grep -q 'skipped-running' "$DATA/hook-events.log" 2>/dev/null && rc=0
+check "sync already running -> skip (no second sync, logs skipped-running)" "$rc" \
+  "exit $CODE hist=$([ -f "$DATA/session-history.jsonl" ] && echo yes || echo no)"
 
 echo "== status-context =="
 

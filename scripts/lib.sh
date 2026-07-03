@@ -43,6 +43,15 @@ pc_have_jq() { command -v jq >/dev/null 2>&1; }
 pc_config_file() { printf '%s/.predictable-code/project.json' "$(pc_project_dir)"; }
 pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 
+# True when another `predictable … sync` is already running anywhere on this box:
+# the skill's own foreground `predictable sync --json` and any sibling Stop/
+# SubagentStop hook both match. Callers skip launching a second one — two syncs on
+# the same project race the engine's setup-progress watcher into a runaway (multi-GB
+# stdout / pegged CPU). The pattern needs a literal space before `sync` so it hits
+# `predictable sync` / `…/predictable sync` / the test stub `…predictable.sh sync`,
+# but not the hook scripts' own `…/sync-run.sh` paths (no space there).
+pc_sync_running() { pgrep -f 'predictable[^ ]* sync' >/dev/null 2>&1; }
+
 # Append one audit line: `<iso8601> <event> <matcher> <verdict>`. This is the
 # observable side effect the L5 integration tests assert on ("hooks fired"), so
 # it is best-effort but always attempted, even when jq is missing.
