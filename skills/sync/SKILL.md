@@ -9,6 +9,15 @@ This plugin exposes exactly one Predictable command: **`predictable sync`**. It 
 the whole verification pipeline internally (translate → analyze → infer →
 prove/verify → diagnose) and returns a single verdict. There are no other verbs.
 
+> **Speak the user's language — never leak Predictable's internals.** Predictable
+> works by translating the code into **Lean** and proving it there, but that is an
+> INTERNAL implementation detail. Unless the user is verifying a Lean project,
+> **never** mention to the user: Lean, `.lean` files, theorems, `SPEC-NNN` ids,
+> `lake`/build errors, solver/tactic/mvcgen names, or the raw verdict constructor
+> names. Describe everything in terms of *their* source language (Java, …), their
+> **specification**, their **functions** and **requirements**. E.g. say "one
+> requirement couldn't be checked", not "a Lean build issue on SPEC-034".
+
 ## How to run it
 
 `predictable` must be on PATH — invoke it **directly**. Do NOT use
@@ -65,16 +74,17 @@ tool needs no permission) a few times, and after each phase post **one short
 milestone line** to the user. **Every line MUST start with its emoji — this is
 required:**
 
-- 🔄 Translating source → Lean…
-- 📋 Inferring specs — N found…
-- 🔍 Proving specs — X/N…
-- 🧪 Analyzing functions…
-- ✅ Sync complete — reading the verdict…
+- 🔄 Reading your code…
+- 📋 Deriving the spec — N requirements…
+- 🔍 Verifying requirements — X/N…
+- 🧪 Analyzing functions for faults…
+- ✅ Check complete — preparing the report…
 
-Log signals to key on: `Translation engine` / `direct-translate` → 🔄; inference
-lines → 📋; count `[SPEC-NNN] proving complete` vs the spec total → 🔍 X/N;
-`Scanning … Code for translated functions` → 🧪. Keep it to a handful — inform,
-don't spam.
+Map the log's internal markers to these lines but **never parrot the internals**
+(no Lean, no `SPEC-NNN`, no "proving"/"theorem", no build errors — see the rule at
+the top): `Translation engine` / `direct-translate` → 🔄; inference lines → 📋;
+count `[SPEC-NNN] proving complete` vs the spec total → 🔍 X/N; `Scanning … Code
+for translated functions` → 🧪. Keep it to a handful — inform, don't spam.
 
 To finish: poll the background task's status/output with the Bash tool (not a
 shell loop). When it completes, its captured stdout **is** the `SyncResponse`
@@ -92,7 +102,11 @@ The key is the verdict:
 - **`verificationError`** — the project did not verify cleanly (e.g. a
   translation or build failure). Address the reported error, then re-run.
 
-Extract the verdict quickly with `jq -r 'keys[0]'`.
+Extract the verdict quickly with `jq -r 'keys[0]'`. Those constructor names are
+for YOUR logic — when reporting to the user, translate: `inSync` → "your code
+meets its spec"; `specViolation` → "a requirement is broken — here's the case
+that breaks it"; `verificationError` → "the project couldn't be fully checked".
+Cite the user's own source file + line (from `.source-map.json`), never `.lean`.
 
 ## Where the details live
 
