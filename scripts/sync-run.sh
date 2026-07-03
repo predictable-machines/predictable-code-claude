@@ -5,8 +5,9 @@
 #
 # `predictable sync` is heavy, so on these hot-path events we DON'T block on it:
 # we kick it off in the background (writing its verdict to the shared
-# last-verdict file) and immediately surface the *previous* verdict as
-# additionalContext. The next turn's status-context picks up the fresh verdict.
+# last-verdict file) and immediately surface the *previous* verdict as an advisory
+# (additionalContext on PostToolUse, systemMessage on Stop/SubagentStop — see
+# emit_advisory). The next turn's status-context picks up the fresh verdict.
 # Set PREDICTABLE_SYNC_FOREGROUND=1 to run synchronously (used by the L1 tests
 # and available for debugging).
 
@@ -18,6 +19,17 @@ stdin_json=$(mktemp 2>/dev/null || echo "/tmp/pc-sync-run.$$")
 cat >"$stdin_json"
 event="$(pc_read_event "$stdin_json")"
 [ "$event" = "-" ] && event="PostToolUse"
+
+# Route an advisory to the right output shape for this event. Only PostToolUse
+# accepts `hookSpecificOutput.additionalContext`; Stop/SubagentStop accept only
+# top-level fields, so their advisory (the closing "proven in sync" summary) goes
+# through `systemMessage`. Using additionalContext on Stop fails schema validation.
+emit_advisory() { # message
+  case "$event" in
+    Stop | SubagentStop) pc_emit_system_message "$1" ;;
+    *) pc_emit_context "$event" "$1" ;;
+  esac
+}
 
 # Matcher label for the audit log: the tool name when present, else the event.
 matcher="$(jq -r '.tool_name // .toolName // "-"' "$stdin_json" 2>/dev/null || echo "-")"
@@ -31,7 +43,7 @@ verdict_file="$(pc_last_verdict_file)"
 # setup wizard and hang this hook. Advise, don't act.
 if ! pc_is_configured; then
   pc_log "$event" "$matcher" not-configured
-  pc_emit_context "$event" "Predictable Code is not set up in this project yet — run the /predictable-code:sync skill (it will configure it) before syncing."
+  emit_advisory "Predictable Code is not set up in this project yet — run the /predictable-code:sync skill (it will configure it) before syncing."
   rm -f "$stdin_json" 2>/dev/null || true
   exit 0
 fi
@@ -65,7 +77,7 @@ pc_log "$event" "$matcher" "$verdict"
 # reads as the closing "proven in sync" summary once the code lands in sync.
 summary="$(pc_session_summary)"
 if [ -n "$summary" ]; then
-  pc_emit_context "$event" "$summary"
+  emit_advisory "$summary"
 fi
 
 rm -f "$stdin_json" 2>/dev/null || true

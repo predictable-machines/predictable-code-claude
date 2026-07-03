@@ -88,7 +88,9 @@ pc_read_event() { # captured-stdin-file
 
 # --- JSON control-output emitters (Claude/Codex share these shapes) ----------
 
-# additionalContext injection (SessionStart/UserPromptSubmit/PreCompact/Stop/…).
+# additionalContext injection. Valid ONLY for events that accept
+# hookSpecificOutput.additionalContext (SessionStart / UserPromptSubmit /
+# PostToolUse / PreCompact). Stop/SubagentStop do NOT — use pc_emit_system_message.
 pc_emit_context() { # event context
   pc_have_jq || return 0
   jq -n --arg e "$1" --arg c "$2" \
