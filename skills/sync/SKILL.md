@@ -45,14 +45,35 @@ If it prints `needs-setup`, initialize it **non-interactively** (never run bare
 If setup reports a problem, or needs a choice you cannot safely infer, **ask the
 user** before continuing rather than guessing.
 
-### 2. Run sync
+### 2. Run sync — and narrate progress as it goes
+
+`sync` takes minutes and `--json` prints **nothing** until it finishes, so don't
+block on it in silence. Run it in the **background** and report milestones to the
+user in short prose + emoji by reading its live log.
+
+Start it (from the project root), capturing the final JSON verdict:
 
 ```sh
-predictable sync --json
+predictable sync --json > "$TMPDIR/pc-sync-verdict.json" 2>/dev/null &
 ```
 
-Run from the project root — `sync` uses `.predictable-code/` and writes artifacts
-under `verification/`. Pass no other flags (zero configuration).
+While it runs, `sync` streams a log to `.predictable-code/logs/<date>/<hour>.log`
+(newest file). Poll the tail of that file every ~20–30s and post **one short
+line** per phase transition — e.g.:
+
+- 🔄 Translating source → Lean…
+- 📋 Inferring specs — N found…
+- 🔍 Proving specs — X/N done…
+- 🧪 Analyzing functions…
+
+Log signals to key on: `Translation engine` / `direct-translate` (translating);
+`Inferring` / spec-inference lines (inferring); count `[SPEC-NNN] proving
+complete` lines against the spec total (proving X/N); `Scanning … Code for
+translated functions` (analyzing). Keep it to a handful of updates — inform, don't
+spam. Use the **Read** tool for the log (no Bash permission prompt).
+
+When the background job finishes, read `$TMPDIR/pc-sync-verdict.json` for the
+verdict and continue below. Pass no other flags (zero configuration).
 
 ## Interpreting the verdict
 
