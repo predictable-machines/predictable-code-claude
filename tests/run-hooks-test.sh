@@ -156,14 +156,26 @@ check "UserPromptSubmit with no verdict -> 'no sync yet' context" $? "exit $CODE
 
 echo "== bootstrap =="
 
+# Dev fallback: a `predictable` on PATH + no token -> stay quiet (no nag).
+fresh_data
+fakebin=$(mktemp -d)
+printf '#!/bin/sh\nexit 0\n' >"$fakebin/predictable"
+chmod +x "$fakebin/predictable"
+unset PREDICTABLE_DIST_TOKEN
+OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" PATH="$fakebin:$PATH" "$ROOT/scripts/bootstrap.sh" <"$ROOT/fixtures/session-start.json" 2>"$ERRFILE")
+CODE=$?
+rc=1
+[ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
+check "predictable on PATH, no token -> quiet (no nag)" "$rc" "exit $CODE out=$OUT"
+
+# Nothing usable: no token, no predictable, no bundle -> clean advisory, no leak.
 fresh_data
 unset PREDICTABLE_DIST_TOKEN
-run_hook bootstrap.sh session-start.json
-[ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && contains "$OUT" 'PREDICTABLE_DIST_TOKEN'
-check "SessionStart, no token -> clean systemMessage, exit 0" $? "exit $CODE out=$OUT"
-# Privacy: a failure path must NEVER mention Predictable source paths/packages.
-! contains "$OUT" 'packages/Predictable' && ! contains "$OUT" '.lean'
-check "bootstrap failure output leaks no source" $? "out=$OUT"
+OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" PATH="/usr/bin:/bin:/usr/sbin:/sbin" "$ROOT/scripts/bootstrap.sh" <"$ROOT/fixtures/session-start.json" 2>"$ERRFILE")
+CODE=$?
+rc=1
+[ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && ! contains "$OUT" 'packages/Predictable' && ! contains "$OUT" '.lean' && rc=0
+check "no token/predictable/bundle -> advisory, exit 0, no leak" "$rc" "exit $CODE out=$OUT"
 
 echo "== not-configured guard (no setup wizard, no hang) =="
 

@@ -67,7 +67,13 @@ fail_advisory() { # message
 
 token="${PREDICTABLE_DIST_TOKEN:-}"
 if [ -z "$token" ]; then
-  fail_advisory "Predictable Code: runtime bundle not installed and PREDICTABLE_DIST_TOKEN is unset. Set your distribution token to enable \`predictable sync\`. (No source is ever downloaded; the token only unlocks the compiled runtime.)"
+  # Dev / local fallback: if a `predictable` is already on PATH, the wrapper runs
+  # it — no bundle or token needed — so stay silent instead of nagging.
+  if command -v predictable >/dev/null 2>&1; then
+    pc_log SessionStart bootstrap dev-path
+    exit 0
+  fi
+  fail_advisory "Predictable Code: no runtime bundle and no \`predictable\` on PATH. Set PREDICTABLE_DIST_TOKEN to fetch the runtime, or install \`predictable\`. (No source is ever downloaded; the token only unlocks the compiled runtime.)"
 fi
 
 for tool in curl tar; do
