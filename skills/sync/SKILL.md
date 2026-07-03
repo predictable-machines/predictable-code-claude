@@ -54,37 +54,28 @@ If it prints `needs-setup`, initialize it **non-interactively** (never run bare
 If setup reports a problem, or needs a choice you cannot safely infer, **ask the
 user** before continuing rather than guessing.
 
-### 2. Run sync — and narrate progress with emojis
+### 2. Run sync — with a couple of progress notes
 
-`sync` takes minutes and `--json` prints nothing until it finishes. Run it with
-the **Bash tool's background mode** (`run_in_background: true`) — this exact
-command, no other flags:
+`sync` takes minutes and `--json` prints nothing until it finishes. Run it in the
+**background** with the Bash tool (`run_in_background: true`) — this exact command:
 
 ```sh
 predictable sync --json
 ```
 
-Do **NOT** append a shell `&`, and do **NOT** write a `sleep` / `until` / `while`
-wait-loop — the harness blocks foreground sleeps; use the Bash tool's own
-background polling to know when it finishes.
+Then, simply:
 
-**Never read `.predictable-code/logs/**`.** That is Predictable's internal engine
-log; it is full of implementation detail (the engine, solver, intermediate build
-output) that is meaningless — and confusing — to the user, and it must never enter
-this conversation. Take progress ONLY from domain-level signals:
-
-- 🔄 Reading your code… (emit right after you launch it)
-- 🧪 Verifying your code against its spec — this takes a few minutes…
-- optionally, once results start landing, count the files in
-  `.predictable-code/verification/.analysis-findings/` with the **Glob** tool and
-  post `🧪 Analyzed N functions so far…` — a COUNT only, never their names/contents
-- ✅ Check complete — preparing the report… (when the background task finishes)
-
-Every line starts with its emoji. Keep it to a handful — inform, don't spam.
-
-When the background task completes, its captured stdout **is** the `SyncResponse`
-JSON — parse it and continue below. Do not surface any internal error text a
-failed run might carry; translate to plain language (see the top rule).
+1. Post one or two short, emoji-led, domain-level lines so the user knows it's
+   working — nothing derived from internals:
+   - 🔄 Reading your code…
+   - 🧪 Verifying your code against its spec — this takes a few minutes…
+2. **Wait for it to finish. You are notified automatically when a background task
+   completes** — so do NOT poll it, do NOT run `sleep` / `until` / `while`, do NOT
+   use Glob/other tools to watch it, and do NOT read `.predictable-code/logs/**`
+   (internal engine log — see the top rule).
+3. On completion, its captured stdout **is** the `SyncResponse` JSON. Post
+   `✅ Check complete`, then report per below. If the run failed, translate the
+   problem to plain language — never surface internal / build / engine text.
 
 ## Interpreting the verdict
 
