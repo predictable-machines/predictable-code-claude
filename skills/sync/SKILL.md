@@ -79,21 +79,33 @@ Then, simply:
 
 ## Interpreting the verdict
 
-`sync --json` prints a `SyncResponse` as a single-key object `{ "<verdict>": { … } }`.
-The key is the verdict:
+`sync --json` prints a `SyncResponse` as a single-key object `{ "<verdict>": { … } }`
+(get the key with `jq -r 'keys[0]'`). Handle **every** verdict — a verdict is NOT
+a failure just because it isn't `inSync`, so never treat one as an error or go
+hunting for "what went wrong":
 
+- **`mechanical`** — **the default outcome.** Predictable inferred the
+  requirements and ran its SMT analysis, but skipped formal proving
+  (`PREDICTABLE_SYNC_PROVE` is off by default). This is a **success**. Fields:
+  `{specsChecked, requirementsInferred}`. The substance is the **analysis
+  findings** — report those (next section): the real issues Predictable caught,
+  each with its source file + line. Do NOT describe it as "verification failed",
+  "couldn't find a specification", or go digging for an error.
 - **`inSync`** — the code satisfies its specification. Nothing to do.
-- **`specViolation`** — one or more requirements are **refuted**. The code
-  contradicts its spec. Read the counterexamples and fix the code (or, if the
-  spec is wrong, the spec) until `sync` reports `inSync`.
-- **`verificationError`** — the project did not verify cleanly (e.g. a
-  translation or build failure). Address the reported error, then re-run.
+- **`specViolation`** — one or more requirements are refuted; read the
+  counterexamples and fix the code (or the spec) until it's back in sync.
+- **`verificationError`** — the project couldn't be fully checked (a build/setup
+  problem). Address it, then re-run.
+- **`inferSpecs`** — source found but no specs yet; inference is the next step.
+- **`noCode`** — no source code detected to verify.
 
-Extract the verdict quickly with `jq -r 'keys[0]'`. Those constructor names are
-for YOUR logic — when reporting to the user, translate: `inSync` → "your code
-meets its spec"; `specViolation` → "a requirement is broken — here's the case
-that breaks it"; `verificationError` → "the project couldn't be fully checked".
-Cite the user's own source file + line (from `.source-map.json`), never `.lean`.
+Those constructor names are for YOUR logic — when reporting, translate to plain
+language (never the raw name or engine internals): `mechanical` → "Predictable
+analyzed your code, inferred N requirements, and caught the issues below";
+`inSync` → "your code meets its spec"; `specViolation` → "a requirement is broken
+— here's the failing case"; `verificationError` → "the project couldn't be fully
+checked". Cite the user's own source file + line (from `.source-map.json`), never
+`.lean`.
 
 ## Where the details live
 
@@ -110,8 +122,13 @@ the loop stays smooth; shelling out for the same thing makes the user approve
 each command. Likewise, read `sync`'s JSON from its own stdout directly — don't
 redirect it to a temp file and then `cat` the temp file back.
 
-Report the verdict to the user and, when it is not `inSync`, summarize the
-refuted requirement(s) and the counterexample, then propose a fix.
+Report the verdict in plain language, then summarize the concrete findings in
+`.analysis-findings/` — the `verify_*` files are spec-requirement checks, the
+`analyze_*` files are general SMT analysis — as the **real issues Predictable
+caught**, each mapped to its source file + line via `.source-map.json`. Propose
+fixes for the genuine ones. In `mechanical` mode (the default) these findings ARE
+the result — don't wait for proving or treat their absence-of-proofs as a
+problem.
 
 ## Progress the hooks surface
 
