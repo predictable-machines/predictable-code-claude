@@ -36,12 +36,30 @@ pc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 pc_have_jq() { command -v jq >/dev/null 2>&1; }
 
-# `predictable init` writes `<project>/.predictable-code/project.json`. Until it
-# exists, `predictable sync` drops into an INTERACTIVE setup wizard (engine/mode
-# picker) that ignores `--json` and would hang a non-TTY hook — so every hook
-# that runs `sync` must guard on this and skip when the project isn't set up.
+# `predictable init` writes `<project>/.predictable-code/project.json`; `sync`
+# needs it to work at all. `pc_ensure_init` guarantees it before any sync runs.
 pc_config_file() { printf '%s/.predictable-code/project.json' "$(pc_project_dir)"; }
 pc_is_configured() { [ -f "$(pc_config_file)" ]; }
+
+# INVARIANT: the project must be initialized before `predictable sync` runs — in
+# EVERY case Claude can land in an uninitialized checkout (a fresh session, a git
+# worktree — a clean checkout whose gitignored `.predictable-code/` never carries
+# over — or any other git/Claude feature). This is the single shared entry point:
+# every sync path (session-sync, sync-run, sync-gate) calls it first. Runs a
+# headless, idempotent `predictable init` (default Claude engine;
+# `--accept-config-suggestions` auto-accepts detected paths so nothing prompts and
+# the setup TUI never launches). Returns 0 iff configured afterward; the caller
+# decides what to do when init couldn't run (no runtime) — it must NOT trap.
+pc_ensure_init() {
+  pc_is_configured && return 0
+  _pc_bin="$(pc_predictable_bin)"
+  [ -x "$_pc_bin" ] || _pc_bin="$(command -v predictable 2>/dev/null || true)"
+  [ -n "$_pc_bin" ] || return 1
+  _pc_proj="$(pc_project_dir)"
+  _pc_name=$(basename "$_pc_proj" 2>/dev/null || echo project)
+  ( cd "$_pc_proj" 2>/dev/null && "$_pc_bin" init "$_pc_name" --adapter claude --accept-config-suggestions ) >/dev/null 2>&1 || true
+  pc_is_configured
+}
 
 # True when another `predictable … sync` is already running anywhere on this box:
 # the skill's own foreground `predictable sync --json` and any sibling Stop/

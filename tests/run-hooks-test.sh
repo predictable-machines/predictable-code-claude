@@ -249,29 +249,50 @@ rc=1
 [ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && ! contains "$OUT" 'packages/Predictable' && ! contains "$OUT" '.lean' && rc=0
 check "no token/predictable/bundle -> advisory, exit 0, no leak" "$rc" "exit $CODE out=$OUT"
 
-echo "== not-configured guard (no setup wizard, no hang) =="
+echo "== ensure-init before sync (auto-init, never the wizard, never hang) =="
 
+# INVARIANT: sync is never run uninitialized. An unconfigured project auto-inits
+# (headless) then syncs.
 fresh_data
 unconfigure
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh post-tool-use-write.json
 rc=1
-[ "$CODE" -eq 0 ] && contains "$OUT" 'not set up' && [ ! -f "$DATA/last-verdict.json" ] && rc=0
-check "sync-run unconfigured -> skips sync, advises setup" "$rc" "exit $CODE out=$OUT"
+[ "$CODE" -eq 0 ] && [ -f "$CLAUDE_PROJECT_DIR/.predictable-code/project.json" ] && [ -f "$DATA/last-verdict.json" ] && rc=0
+check "sync-run unconfigured -> auto-inits then syncs" "$rc" "exit $CODE out=$OUT"
 
+# When init itself can't run (no runtime), advise and step aside — never trap.
 fresh_data
 unconfigure
-STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
+STUB_FAIL=1 PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh post-tool-use-write.json
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -f "$DATA/last-verdict.json" ] && rc=0
+check "sync-run init-fails -> advises, no sync (never trap)" "$rc" "exit $CODE out=$OUT"
+
+# The gate auto-inits then gates (inSync -> allow).
+fresh_data
+unconfigure
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" \
   run_hook sync-gate.sh pre-tool-use-git-push.json
 rc=1
-[ "$CODE" -eq 0 ] && ! contains "$OUT" 'deny' && rc=0
-check "sync-gate unconfigured -> allows (no gate, no hang)" "$rc" "exit $CODE out=$OUT"
+[ "$CODE" -eq 0 ] && [ -f "$CLAUDE_PROJECT_DIR/.predictable-code/project.json" ] && ! contains "$OUT" 'deny' && rc=0
+check "sync-gate unconfigured -> auto-inits then gates" "$rc" "exit $CODE out=$OUT"
 
+# Gate: init can't run -> allow with notice, never block.
+fresh_data
+unconfigure
+STUB_FAIL=1 run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$OUT" 'deny' && rc=0
+check "sync-gate init-fails -> allows with notice (never block)" "$rc" "exit $CODE out=$OUT"
+
+# status-context is read-only: it never inits, just advises setup.
 fresh_data
 unconfigure
 run_hook status-context.sh user-prompt-submit.json
 contains "$OUT" 'not set up'
-check "status-context unconfigured -> advises setup" $?
+check "status-context unconfigured -> advises setup (read-only)" $?
 
 echo "== side effects =="
 rc=1

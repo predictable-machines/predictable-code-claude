@@ -47,11 +47,12 @@ project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
-# Never run `sync` before the project is set up — it would launch the interactive
-# setup wizard and hang this hook. Advise, don't act.
-if ! pc_is_configured; then
+# Guarantee the project is initialized before syncing (shared invariant — sync
+# needs it in every case, incl. fresh worktrees). Only when init can't run (no
+# runtime) do we advise and step aside — never trap the turn.
+if ! pc_ensure_init; then
   pc_log "$event" "$matcher" not-configured
-  emit_advisory "Predictable Code is not set up in this project yet — run the /predictable-code:sync skill (it will configure it) before syncing."
+  emit_advisory "Predictable Code couldn't initialize this project (runtime unavailable) — run the /predictable-code:sync skill to set it up."
   rm -f "$stdin_json" 2>/dev/null || true
   exit 0
 fi

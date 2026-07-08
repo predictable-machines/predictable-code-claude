@@ -41,12 +41,12 @@ project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
-# Can't gate a project that isn't set up — running `sync` here would launch the
-# interactive setup wizard and hang. Allow the command with a notice instead of
-# blocking or hanging.
-if ! pc_is_configured; then
+# Guarantee init before gating (shared invariant — the gate runs a real sync). If
+# init can't run (no runtime), allow the command with a notice — never block or hang
+# on setup.
+if ! pc_ensure_init; then
   pc_log PreToolUse sync-gate not-configured
-  pc_emit_system_message "Predictable Code is not set up in this project; not gating this command. Run /predictable-code:sync to configure."
+  pc_emit_system_message "Predictable Code couldn't initialize this project (runtime unavailable); not gating this command."
   exit 0
 fi
 

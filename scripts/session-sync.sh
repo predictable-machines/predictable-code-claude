@@ -35,16 +35,9 @@ if [ ! -x "$bin" ] && ! command -v predictable >/dev/null 2>&1; then
   exit 0
 fi
 
-# Headless init when the project isn't set up yet (idempotent). Default engine is
-# Claude (we're inside Claude Code); `--accept-config-suggestions` auto-accepts the
-# detected source paths so nothing prompts.
-if ! pc_is_configured; then
-  name=$(basename "$project" 2>/dev/null || echo project)
-  ( cd "$project" 2>/dev/null && "$bin" init "$name" --adapter claude --accept-config-suggestions ) >/dev/null 2>&1 || true
-fi
-
-# Init failed / nothing to configure → don't sync.
-pc_is_configured || { pc_log SessionStart session-sync not-configured; exit 0; }
+# Guarantee the project is initialized before syncing (shared invariant). If init
+# can't run (no runtime), don't sync.
+pc_ensure_init || { pc_log SessionStart session-sync not-configured; exit 0; }
 
 # Don't pile onto an in-flight sync (see pc_sync_running — two syncs on one project
 # race the engine into a runaway).

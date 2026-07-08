@@ -85,14 +85,15 @@ terminal they appear as a link, so the skill always pairs one with a text summar
 
 ## First run in a project
 
-`predictable sync` needs the project initialized — otherwise it drops into an
-interactive setup wizard that can't be driven headlessly. The `sync` skill
-handles this: it checks for `.predictable-code/project.json` and, if missing,
-runs a one-time **non-interactive** setup —
-`predictable init "<name>" --adapter claude --accept-config-suggestions` — asking
-you which AI engine to use when it isn't obvious. Until the project is set up the
-hooks stay quiet (they advise running the skill instead of launching the wizard),
-so nothing ever hangs on a prompt.
+`predictable sync` needs the project initialized to work. The plugin guarantees
+that **before any sync runs, in every case** — a fresh session, a git worktree, or
+any other checkout Claude lands in: each sync path first runs a one-time
+**non-interactive**, idempotent setup
+(`predictable init "<name>" --adapter claude --accept-config-suggestions`, default
+Claude engine) if `.predictable-code/project.json` is missing. This is headless and
+**never launches the setup wizard**, so nothing ever hangs on a prompt. If the
+runtime isn't available to init, the hooks step aside with a notice rather than
+blocking. (The `sync` skill does the same check for its own runs.)
 
 ## The verdict
 
