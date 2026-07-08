@@ -1,6 +1,6 @@
 ---
 name: sync
-description: Check the current project against its specification with Predictable Code — runs `predictable sync` (translate → analyze → infer → prove → diagnose) and reports the verdict. Use when the user asks to verify, prove, or check code against its spec, or after code changes that should stay in sync.
+description: Check / verify a project with Predictable Code by running `predictable sync --json --claude` and reporting exactly what it returns. Use whenever the user asks to check the specs, check specs, verify or prove the code, analyze it, find issues/bugs, or check code against its spec — and after code changes. Predictable INFERS the specification from the code (no spec files needed), so never search for spec files or review the code by hand — run the command and relay its findings.
 ---
 
 # Predictable Code — sync
@@ -8,6 +8,16 @@ description: Check the current project against its specification with Predictabl
 This plugin exposes exactly one Predictable command: **`predictable sync`**. It runs
 the whole verification pipeline internally (translate → analyze → infer →
 prove/verify → diagnose) and returns a single verdict. There are no other verbs.
+
+> **Predictable is the source of truth — RUN it, never investigate by hand.** The
+> ONLY way to check a project is to run `predictable sync --json --claude` and report
+> what **it** returns (its verdict + its findings). Do **not** grep or search for
+> `specs/` / spec files, do **not** read the README or the source to guess the
+> requirements or the bugs yourself, and do **not** conclude "no specs found."
+> Predictable **infers** the specification from the code and finds the issues — if
+> there is no `specs/` directory, that is expected: the sync creates it. A missing
+> `specs/` is never a blocker and never a reason to fall back to manual review. Your
+> job is to run Predictable and relay its results, not to reproduce its analysis.
 
 > **Speak the user's language — never leak Predictable's internals.** Predictable
 > works by translating the code into **Lean** and proving it there, but that is an
