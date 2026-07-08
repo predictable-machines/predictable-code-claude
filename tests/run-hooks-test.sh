@@ -149,16 +149,17 @@ run_hook status-context.sh session-start.json
 contains "$OUT" 'no check' && [ ! -f "$DATA/session-history.jsonl" ]
 check "SessionStart:startup resets the session tally" $? "out=$OUT"
 
-echo "== session-sync (SessionStart auto-init + detached first sync) =="
+echo "== session-sync (SessionStart fires 'sync --json --claude' detached) =="
 
-# startup + git repo + already configured -> fires the first sync, persists verdict.
+# startup + git repo -> fires the first sync (--claude auto-inits product-side),
+# persists verdict. No config check in the hook.
 fresh_data
 git -C "$CLAUDE_PROJECT_DIR" init -q 2>/dev/null || true
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook session-sync.sh session-start.json
 rc=1
 [ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ] && rc=0
-check "SessionStart(startup)+git+configured -> fires sync, persists verdict" "$rc" "exit $CODE"
+check "SessionStart(startup)+git -> fires sync, persists verdict" "$rc" "exit $CODE"
 
 # resume source -> no-op (state already exists; don't re-sync).
 fresh_data
@@ -249,50 +250,34 @@ rc=1
 [ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && ! contains "$OUT" 'packages/Predictable' && ! contains "$OUT" '.lean' && rc=0
 check "no token/predictable/bundle -> advisory, exit 0, no leak" "$rc" "exit $CODE out=$OUT"
 
-echo "== ensure-init before sync (auto-init, never the wizard, never hang) =="
+echo "== no config gate (scripts just run 'sync --json --claude'; product auto-inits) =="
 
-# INVARIANT: sync is never run uninitialized. An unconfigured project auto-inits
-# (headless) then syncs.
+# The plugin never checks config — it runs `sync --json --claude` and the PRODUCT
+# auto-initializes if needed. So even unconfigured, the hook runs sync + records a
+# verdict (the stub just prints one; it doesn't init — that's the product's job).
 fresh_data
 unconfigure
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh post-tool-use-write.json
 rc=1
-[ "$CODE" -eq 0 ] && [ -f "$CLAUDE_PROJECT_DIR/.predictable-code/project.json" ] && [ -f "$DATA/last-verdict.json" ] && rc=0
-check "sync-run unconfigured -> auto-inits then syncs" "$rc" "exit $CODE out=$OUT"
+[ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ] && rc=0
+check "sync-run unconfigured -> still runs sync (no config gate)" "$rc" "exit $CODE out=$OUT"
 
-# When init itself can't run (no runtime), advise and step aside — never trap.
-fresh_data
-unconfigure
-STUB_FAIL=1 PREDICTABLE_SYNC_FOREGROUND=1 \
-  run_hook sync-run.sh post-tool-use-write.json
-rc=1
-[ "$CODE" -eq 0 ] && [ ! -f "$DATA/last-verdict.json" ] && rc=0
-check "sync-run init-fails -> advises, no sync (never trap)" "$rc" "exit $CODE out=$OUT"
-
-# The gate auto-inits then gates (inSync -> allow).
+# The gate likewise runs sync unconditionally (inSync -> allow).
 fresh_data
 unconfigure
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" \
   run_hook sync-gate.sh pre-tool-use-git-push.json
 rc=1
-[ "$CODE" -eq 0 ] && [ -f "$CLAUDE_PROJECT_DIR/.predictable-code/project.json" ] && ! contains "$OUT" 'deny' && rc=0
-check "sync-gate unconfigured -> auto-inits then gates" "$rc" "exit $CODE out=$OUT"
-
-# Gate: init can't run -> allow with notice, never block.
-fresh_data
-unconfigure
-STUB_FAIL=1 run_hook sync-gate.sh pre-tool-use-git-push.json
-rc=1
 [ "$CODE" -eq 0 ] && ! contains "$OUT" 'deny' && rc=0
-check "sync-gate init-fails -> allows with notice (never block)" "$rc" "exit $CODE out=$OUT"
+check "sync-gate unconfigured -> runs sync, allows on inSync" "$rc" "exit $CODE out=$OUT"
 
-# status-context is read-only: it never inits, just advises setup.
+# status-context is read-only: it never runs sync; it advises that setup is automatic.
 fresh_data
 unconfigure
 run_hook status-context.sh user-prompt-submit.json
-contains "$OUT" 'not set up'
-check "status-context unconfigured -> advises setup (read-only)" $?
+contains "$OUT" 'set up'
+check "status-context unconfigured -> advisory (auto-configures)" $?
 
 echo "== side effects =="
 rc=1

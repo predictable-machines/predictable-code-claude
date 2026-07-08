@@ -85,15 +85,17 @@ terminal they appear as a link, so the skill always pairs one with a text summar
 
 ## First run in a project
 
-`predictable sync` needs the project initialized to work. The plugin guarantees
-that **before any sync runs, in every case** — a fresh session, a git worktree, or
-any other checkout Claude lands in: each sync path first runs a one-time
-**non-interactive**, idempotent setup
-(`predictable init "<name>" --adapter claude --accept-config-suggestions`, default
-Claude engine) if `.predictable-code/project.json` is missing. This is headless and
-**never launches the setup wizard**, so nothing ever hangs on a prompt. If the
-runtime isn't available to init, the hooks step aside with a notice rather than
-blocking. (The `sync` skill does the same check for its own runs.)
+The plugin never sets anything up itself — it just runs **`predictable sync --json
+--claude`**. The `--claude` flag makes Predictable **auto-initialize** the project
+with sensible Claude defaults (engine + deterministically-detected source paths) if
+it isn't set up yet, then run the check. This is headless and **never launches the
+setup wizard**, so a fresh session, a git worktree, or any other checkout Claude
+lands in self-configures with no user action and nothing ever hangs on a prompt. If
+the runtime isn't available, the hooks step aside with a notice rather than blocking.
+
+To change the engine, source paths, or other settings afterwards, use
+`predictable settings` / `predictable project` (no need to hand-edit
+`.predictable-code/`).
 
 ## The verdict
 

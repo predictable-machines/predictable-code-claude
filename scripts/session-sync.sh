@@ -1,16 +1,16 @@
 #!/usr/bin/env sh
 # shellcheck shell=sh
 #
-# SessionStart(startup): guarantee the project is initialized, then kick off the
-# first `predictable sync` DETACHED. This is what makes a fresh session — and,
-# crucially, a fresh git WORKTREE (a clean checkout with no `.predictable-code/`,
-# which is gitignored so it is NEVER carried over) — self-configure with no user
-# action.
+# SessionStart(startup): kick off the first `predictable sync --json --claude`
+# DETACHED. `--claude` makes the PRODUCT auto-initialize the project (Claude
+# defaults + source detection) when it isn't set up yet, so this hook does NOT
+# check or init anything — it just runs sync. That is what self-configures a fresh
+# session and, crucially, a fresh git WORKTREE (a clean checkout with no
+# `.predictable-code/`, which is gitignored so it is NEVER carried over).
 #
 # Never blocks the session: only runs on `startup`, requires a git repo + a usable
-# runtime, init is headless + idempotent (`--json` never launches the setup TUI),
-# and the sync is detached so SessionStart returns immediately. The verdict lands
-# for the next turn, where status-context surfaces it.
+# runtime, and the sync is detached so SessionStart returns immediately. The verdict
+# lands for the next turn, where status-context surfaces it.
 
 self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 # shellcheck source=scripts/lib.sh
@@ -35,10 +35,6 @@ if [ ! -x "$bin" ] && ! command -v predictable >/dev/null 2>&1; then
   exit 0
 fi
 
-# Guarantee the project is initialized before syncing (shared invariant). If init
-# can't run (no runtime), don't sync.
-pc_ensure_init || { pc_log SessionStart session-sync not-configured; exit 0; }
-
 # Don't pile onto an in-flight sync (see pc_sync_running — two syncs on one project
 # race the engine into a runaway).
 if pc_sync_running; then
@@ -47,11 +43,12 @@ if pc_sync_running; then
 fi
 
 # Fire the first sync DETACHED; SessionStart returns now, the verdict lands next
-# turn. PREDICTABLE_SYNC_FOREGROUND=1 runs it synchronously (L1 tests / debugging).
+# turn. `--claude` auto-inits the project if needed (product-side). PREDICTABLE_SYNC_
+# FOREGROUND=1 runs it synchronously (L1 tests / debugging).
 verdict_file="$(pc_last_verdict_file)"
 run_first_sync() {
   tmp="$verdict_file.tmp.$$"
-  if ( cd "$project" 2>/dev/null && "$bin" sync --json ) >"$tmp" 2>/dev/null; then
+  if ( cd "$project" 2>/dev/null && "$bin" sync --json --claude ) >"$tmp" 2>/dev/null; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     pc_record_sync SessionStart "$verdict_file"
   else

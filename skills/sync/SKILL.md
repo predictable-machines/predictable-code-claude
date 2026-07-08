@@ -26,52 +26,25 @@ not in your shell, so it would expand to an empty path. The plugin's `PreToolUse
 hook **auto-approves `predictable sync` and `predictable init`**, so they run
 without a permission prompt (`git push`/`git commit` still go through the gate).
 
-> **The plugin already self-configures on session start.** A `SessionStart` hook
-> runs a headless `predictable init` (if the project isn't set up) and kicks off a
-> first check **in the background** — including in a fresh git worktree, which
-> starts with no `.predictable-code/`. So on a new session the project is often
-> already configured and a fresh verdict may be landing or present. Check the
-> current state before re-running, and **never start a check while one is already
-> running**.
+> **You never set anything up — just run the check.** `predictable sync --claude`
+> auto-initializes the project with sensible Claude defaults (engine + detected
+> source paths) if it isn't set up yet, then runs the check. A `SessionStart` hook
+> already fires one in the background on a new session or a fresh git worktree
+> (which starts with no `.predictable-code/`), so a verdict may be landing or
+> present. **Never** run `predictable init` yourself, and **never** start a check
+> while one is already running.
 
-### 1. Ensure the project is set up (once per project)
-
-`predictable sync` needs the project initialized. If it isn't, `sync` launches an
-interactive setup wizard that **cannot** be driven from here — so always check
-first, from the project root:
-
-```sh
-test -f .predictable-code/project.json && echo configured || echo needs-setup
-```
-
-If it prints `needs-setup`, initialize it **non-interactively** (never run bare
-`predictable init` — that is interactive):
-
-1. **Choose the AI engine.** Default to **`claude`** (you are running inside
-   Claude Code). Ask the user first only if they might prefer `copilot` or
-   `opencode`, or if they say so.
-2. Run it, using the repository/folder name as the project name:
-
-   ```sh
-   predictable init "<project-name>" --adapter <engine> --accept-config-suggestions
-   ```
-
-   `--accept-config-suggestions` auto-accepts the detected source paths so no
-   prompt appears. Then confirm `.predictable-code/project.json` now exists.
-
-If setup reports a problem, or needs a choice you cannot safely infer, **ask the
-user** before continuing rather than guessing.
-
-### 2. Run sync — with a couple of progress notes
+### 1. Run the check
 
 `sync` takes minutes and `--json` prints nothing until it finishes. Run it in the
 **background** with the Bash tool (`run_in_background: true`) — this exact command:
 
 ```sh
-predictable sync --json
+predictable sync --json --claude
 ```
 
-Then, simply:
+`--claude` auto-initializes the project with Claude defaults if needed, so there is
+nothing to configure first. Then:
 
 1. Post one or two short, emoji-led, domain-level lines so the user knows it's
    working — nothing derived from internals:
@@ -88,11 +61,16 @@ Then, simply:
 **Run only ONE check at a time.** `predictable sync` is exclusive per project —
 never start a second while one is still running (wait for the first to complete).
 
-### 3. Re-check after you change code
+> **Tip — tuning config (optional).** The defaults work out of the box. If the user
+> wants to change the AI engine, the source paths/extensions, or other settings,
+> point them to `predictable settings` / `predictable project` — don't hand-edit
+> `.predictable-code/`.
+
+### 2. Re-check after you change code
 
 The **Fix-issue** and **New-feature** flows edit code and then confirm the result.
-After you apply the edits, run `predictable sync --json` again **exactly as in
-step 2** (same background call, same short progress notes) and report the new
+After you apply the edits, run `predictable sync --json --claude` again **exactly as
+in step 1** (same background call, same short progress notes) and report the new
 verdict — did the issue you fixed disappear, and did anything else change? Editing
 does not auto-run a check; you drive it.
 

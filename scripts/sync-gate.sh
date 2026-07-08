@@ -41,17 +41,11 @@ project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
-# Guarantee init before gating (shared invariant — the gate runs a real sync). If
-# init can't run (no runtime), allow the command with a notice — never block or hang
-# on setup.
-if ! pc_ensure_init; then
-  pc_log PreToolUse sync-gate not-configured
-  pc_emit_system_message "Predictable Code couldn't initialize this project (runtime unavailable); not gating this command."
-  exit 0
-fi
-
+# `sync --json --claude` auto-initializes the project if needed (product-side), so
+# the gate never checks config — it just runs the real sync. If it can't run (no
+# runtime), allow the command with a notice — never block or hang on setup.
 tmp="$verdict_file.tmp.$$"
-if ! ( cd "$project" 2>/dev/null && "$bin" sync --json ) >"$tmp" 2>/dev/null; then
+if ! ( cd "$project" 2>/dev/null && "$bin" sync --json --claude ) >"$tmp" 2>/dev/null; then
   rm -f "$tmp" 2>/dev/null || true
   pc_log PreToolUse sync-gate infra-error
   pc_emit_system_message "Predictable Code: could not run \`predictable sync\` to gate this push (runtime unavailable). Allowing — verify manually."

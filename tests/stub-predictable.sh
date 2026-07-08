@@ -11,18 +11,6 @@ case "$1" in
     echo "predictable (stub) 0.0.0"
     exit 0
     ;;
-  init)
-    # Mirror the real headless init: write project.json so pc_ensure_init sees the
-    # project as configured afterward. STUB_FAIL simulates an init that can't run.
-    if [ "${STUB_FAIL:-}" = "1" ]; then
-      echo "stub: simulated init failure" >&2
-      exit 1
-    fi
-    mkdir -p .predictable-code 2>/dev/null || true
-    printf '{"name":"stub"}\n' >.predictable-code/project.json
-    echo "Initialized (stub)"
-    exit 0
-    ;;
 esac
 
 if [ "${STUB_FAIL:-}" = "1" ]; then

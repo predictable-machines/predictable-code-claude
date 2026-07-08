@@ -47,22 +47,15 @@ project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
-# Guarantee the project is initialized before syncing (shared invariant — sync
-# needs it in every case, incl. fresh worktrees). Only when init can't run (no
-# runtime) do we advise and step aside — never trap the turn.
-if ! pc_ensure_init; then
-  pc_log "$event" "$matcher" not-configured
-  emit_advisory "Predictable Code couldn't initialize this project (runtime unavailable) — run the /predictable-code:sync skill to set it up."
-  rm -f "$stdin_json" 2>/dev/null || true
-  exit 0
-fi
-
 run_sync() { # event
-  # `sync --json` prints the SyncResponse to stdout; persist it atomically so a
-  # partial write never corrupts the verdict a later hook reads, then record the
-  # outcome in the session history that feeds the "issues found vs fixed" metric.
+  # `sync --json --claude` prints the SyncResponse to stdout (and auto-initializes
+  # the project with Claude defaults if it isn't set up — product-side, so this hook
+  # never checks config). Persist it atomically so a partial write never corrupts the
+  # verdict a later hook reads, then record the outcome in the session history that
+  # feeds the "issues found vs fixed" metric. A failed run (no runtime) leaves no
+  # verdict and never traps the turn.
   tmp="$verdict_file.tmp.$$"
-  if ( cd "$project" 2>/dev/null && "$bin" sync --json ) >"$tmp" 2>/dev/null; then
+  if ( cd "$project" 2>/dev/null && "$bin" sync --json --claude ) >"$tmp" 2>/dev/null; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     pc_record_sync "$1" "$verdict_file"
   else
