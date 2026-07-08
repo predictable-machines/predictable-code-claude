@@ -202,6 +202,27 @@ summary. Offer them (don't force them):
 - **Specs / requirements viewer** — the inferred requirements per function, for a
   user who wants to see *what* is being checked.
 
+## Closing a check — you MUST ask (only when there are issues)
+
+How you end a check depends on the result — this is mandatory:
+
+- **Issues were found** — the verdict is `specViolation`, or a `mechanical` /
+  `verificationError` run with one or more findings (any of: `findingsAffecting` or
+  `findingsPotential` > 0, `.analysis-findings/` sidecars present, or requirements
+  violated): you **MUST** end your turn by calling the **`AskUserQuestion` tool**
+  (never a free-text "would you like me to…?") offering the next step, e.g.:
+  - **Fix the critical ones** (recommended)
+  - **Fix all the issues**
+  - **Let me pick which**
+  - **Just the report for now**
+
+  At scale this is the funnel above (one question per tier, batched options); for a
+  handful of issues, a single `AskUserQuestion` with these options is enough.
+
+- **No issues** — `inSync`, or a `mechanical` run with **zero** findings: do **NOT**
+  ask. Just report the code is in sync / clean. Never pop a question when there is
+  nothing to decide.
+
 ## Applying fixes (confirm first)
 
 Before editing code to fix findings — **especially a bulk/batch fix** — confirm the
