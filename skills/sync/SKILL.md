@@ -26,6 +26,14 @@ not in your shell, so it would expand to an empty path. The plugin's `PreToolUse
 hook **auto-approves `predictable sync` and `predictable init`**, so they run
 without a permission prompt (`git push`/`git commit` still go through the gate).
 
+> **The plugin already self-configures on session start.** A `SessionStart` hook
+> runs a headless `predictable init` (if the project isn't set up) and kicks off a
+> first check **in the background** — including in a fresh git worktree, which
+> starts with no `.predictable-code/`. So on a new session the project is often
+> already configured and a fresh verdict may be landing or present. Check the
+> current state before re-running, and **never start a check while one is already
+> running**.
+
 ### 1. Ensure the project is set up (once per project)
 
 `predictable sync` needs the project initialized. If it isn't, `sync` launches an
@@ -133,13 +141,12 @@ the loop stays smooth; shelling out for the same thing makes the user approve
 each command. Likewise, read `sync`'s JSON from its own stdout directly — don't
 redirect it to a temp file and then `cat` the temp file back.
 
-Report the verdict in plain language, then summarize the concrete findings in
-`.analysis-findings/` — the `verify_*` files are spec-requirement checks, the
-`analyze_*` files are general SMT analysis — as the **real issues Predictable
-caught**, each mapped to its source file + line via `.source-map.json`. Propose
-fixes for the genuine ones. In `mechanical` mode (the default) these findings ARE
-the result — don't wait for proving or treat their absence-of-proofs as a
-problem.
+The `verify_*` sidecars are spec-requirement checks; `analyze_*` are general SMT
+analysis. Each is a **real issue Predictable caught**, mapped to its source file +
+line via `.source-map.json`. In `mechanical` mode (the default) these findings ARE
+the result — don't wait for proving or treat their absence-of-proofs as a problem.
+**How you present and act on them depends on how many there are — see "Reporting
+findings" below.**
 
 **Do not read build-status meta-fields in `.analysis-results.json` as a
 pass/fail signal.** `buildSucceeded: false` does NOT mean "nothing was analyzed"
@@ -148,6 +155,71 @@ translation fell back to the LLM. What matters is the findings: use
 `findingsAffecting` / `findingsPotential` and the `.analysis-findings/` sidecars.
 If findings exist, Predictable analyzed the code — report them; never claim "0 of
 N functions processed" when `results` is non-empty.
+
+## Reporting findings (scales from 1 to thousands)
+
+Predictable runs on **large** projects — a check can return **thousands** of
+findings. Never dump them all into chat, and never build an `AskUserQuestion` with
+hundreds of options. Two surfaces, two roles: **an Artifact enumerates, a question
+decides.**
+
+**Rank most-critical-first, always, by tier:**
+
+1. **Broken contracts** — a requirement is refuted with a counterexample
+   (`specViolation`, and `verify_*` findings). Usually a small set; surface first.
+2. **Reachable now** — faults an existing call site can already trigger
+   (`findingsAffecting`: null-dereference, divide-by-zero, overflow, index-out-of-
+   range…).
+3. **Future-only** — a fault only a hypothetical future caller could reach
+   (`findingsPotential`).
+
+Tie-break within a tier by category severity and blast radius (how many call sites
+/ how central the function). When present, read the aggregate `summary`
+(counts by tier / category / file) from the sync output instead of loading every
+sidecar.
+
+**Small result (≲ 15 findings):** just list them inline — plain language, grouped
+by the tiers above, each with `file:line` and a one-line description + a proposed
+fix. No Artifact, no funnel.
+
+**Large result (more than that, up to thousands):**
+
+1. **Generate an Artifact "findings dashboard"** (self-contained HTML) — the full,
+   grouped, scrollable enumeration (tier → category → file, with counts). This is
+   where the user *sees* everything; it scales to thousands. In a plain terminal
+   the Artifact shows as a link, so also post a short **text rollup** (the tier /
+   category counts) as the at-a-glance summary.
+2. **Then drive a short funnel of `AskUserQuestion` decisions — most-critical
+   first, each option a BATCH (never an individual finding), always with a
+   recommended default.** Use `multiSelect` where several batches can be picked:
+   - Q1 — "N **broken contracts**. Fix them now?" (the small critical set, first)
+   - Q2 — "M **reachable-now** issues in K categories — which to fix?" options =
+     the top categories or files (e.g. "Null-checks (140)", "Overflow (60)",
+     "By file…"), `multiSelect`
+   - Q3 — "P **future-only** issues — defer / fix by module / ignore?"
+3. **Fix the chosen batch, then re-check and re-rank** (`predictable sync` again)
+   and present the next chunk. Cap each pass (≈ top 20) so a 2,000-issue repo is
+   handled in bounded rounds that always show the current most-critical — never one
+   giant edit.
+
+## Rich views (Artifacts)
+
+Artifacts are self-contained HTML pages that render in the Desktop and web apps;
+in a plain terminal they appear as a link, so always pair one with a short text
+summary. Offer them (don't force them):
+
+- **Findings dashboard** — the large-result enumeration above.
+- **Stats / branding dashboard** — "Predictable caught N issues, you fixed M, all
+  proven against the spec" (see the metric below). Good at an `inSync` finish.
+- **Specs / requirements viewer** — the inferred requirements per function, for a
+  user who wants to see *what* is being checked.
+
+## Applying fixes (confirm first)
+
+Before editing code to fix findings — **especially a bulk/batch fix** — confirm the
+plan with the user via `AskUserQuestion` (the batch/strategy, per the funnel — not
+one prompt per finding). After applying, re-run the check to confirm the batch
+cleared (that is the **Re-check** step above). Never bulk-rewrite without an OK.
 
 ## Progress the hooks surface
 

@@ -2,11 +2,14 @@
 # shellcheck shell=sh
 #
 # Pre-push/pre-commit gate (PreToolUse on Bash). This is the ONE place `sync`
-# runs synchronously and can block: a `git push` / `git commit` is only allowed
-# when the project is `inSync`.
+# runs synchronously and can block a `git push` / `git commit`.
 #
 # Gate discipline (see the plan's risk notes):
-#   - Only DENY on a genuine non-`inSync` verdict.
+#   - DENY only on a genuine refutation (`specViolation`) — a broken requirement
+#     with a counterexample. Every OTHER non-`inSync` verdict (verificationError,
+#     mechanical, inferSpecs, noCode) is ADVISORY: allow + systemMessage, never
+#     block. Blocking on verificationError would trap every push whenever the
+#     project merely couldn't be fully checked, which is not a spec breach.
 #   - NEVER block on an infra error (sync couldn't run, no runtime): allow +
 #     systemMessage, so a broken toolchain never traps the user.
 
@@ -60,13 +63,21 @@ pc_record_sync sync-gate "$verdict_file"
 verdict="$(pc_verdict_name "$verdict_file")"
 pc_log PreToolUse sync-gate "$verdict"
 
-if [ "$verdict" = "inSync" ]; then
-  exit 0
-fi
-
-reason="Predictable Code blocked this command: $(pc_verdict_summary "$verdict"). Fix the refuted requirement(s) (see verification/.analysis-results.json) and re-run \`predictable sync\` until it reports inSync before pushing."
-# Emit the structured deny AND a stderr reason, and exit 2: whichever signal the
-# host honors, the command is blocked.
-pc_emit_deny "$reason"
-printf '%s\n' "$reason" >&2
-exit 2
+# Only a genuine refutation blocks; everything else is advisory (allow + notice).
+case "$verdict" in
+  specViolation)
+    reason="Predictable Code blocked this command: $(pc_verdict_summary "$verdict"). Fix the refuted requirement(s) and re-run the check until the code is back in sync before pushing."
+    # Emit the structured deny AND a stderr reason, and exit 2: whichever signal
+    # the host honors, the command is blocked.
+    pc_emit_deny "$reason"
+    printf '%s\n' "$reason" >&2
+    exit 2
+    ;;
+  inSync)
+    exit 0
+    ;;
+  *)
+    pc_emit_system_message "Predictable Code: $(pc_verdict_summary "$verdict") — allowing the push (advisory; only a broken requirement blocks)."
+    exit 0
+    ;;
+esac

@@ -61,13 +61,20 @@ fi
 echo "== sync-gate =="
 
 fresh_data
-STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
+STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" \
   run_hook sync-gate.sh pre-tool-use-git-push.json
 contains "$OUT" '"permissionDecision": "deny"'
-check "git push + verificationError -> deny JSON" $?
+check "git push + specViolation -> deny JSON" $?
 rc=1
 [ "$CODE" -eq 2 ] && rc=0
-check "git push + verificationError -> exit 2" "$rc" "got exit $CODE"
+check "git push + specViolation -> exit 2" "$rc" "got exit $CODE"
+
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+[ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && ! contains "$OUT" 'deny' && rc=0
+check "git push + verificationError -> advisory allow (no block)" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" \
@@ -139,8 +146,51 @@ check "session-history recorded 2 syncs" "$rc" "history=$(cat "$DATA/session-his
 
 # A fresh session (SessionStart:startup) resets the tally for the next run.
 run_hook status-context.sh session-start.json
-contains "$OUT" 'no sync' && [ ! -f "$DATA/session-history.jsonl" ]
+contains "$OUT" 'no check' && [ ! -f "$DATA/session-history.jsonl" ]
 check "SessionStart:startup resets the session tally" $? "out=$OUT"
+
+echo "== session-sync (SessionStart auto-init + detached first sync) =="
+
+# startup + git repo + already configured -> fires the first sync, persists verdict.
+fresh_data
+git -C "$CLAUDE_PROJECT_DIR" init -q 2>/dev/null || true
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook session-sync.sh session-start.json
+rc=1
+[ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ] && rc=0
+check "SessionStart(startup)+git+configured -> fires sync, persists verdict" "$rc" "exit $CODE"
+
+# resume source -> no-op (state already exists; don't re-sync).
+fresh_data
+git -C "$CLAUDE_PROJECT_DIR" init -q 2>/dev/null || true
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook session-sync.sh session-start-resume.json
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -f "$DATA/last-verdict.json" ] && rc=0
+check "SessionStart(resume) -> no-op (no sync)" "$rc" "verdict=$([ -f "$DATA/last-verdict.json" ] && echo yes || echo no)"
+
+# not a git repo -> never scaffold.
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook session-sync.sh session-start.json
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -f "$DATA/last-verdict.json" ] && rc=0
+check "SessionStart non-git dir -> no-op (never scaffold)" "$rc" "verdict=$([ -f "$DATA/last-verdict.json" ] && echo yes || echo no)"
+
+echo "== metric counts analysis findings =="
+
+# pc_issue_count prefers findingsAffecting from the project's analysis results over
+# the verdict counters (inSync would otherwise count 0).
+fresh_data
+mkdir -p "$CLAUDE_PROJECT_DIR/.predictable-code/verification"
+printf '{"findingsAffecting": 7, "findingsPotential": 3}' \
+  >"$CLAUDE_PROJECT_DIR/.predictable-code/verification/.analysis-results.json"
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+iss=$(jq -r '.issues' "$DATA/session-history.jsonl" 2>/dev/null | tail -1)
+rc=1
+[ "$iss" = "7" ] && rc=0
+check "metric counts analysis findingsAffecting (7), not the inSync verdict (0)" "$rc" "issues=$iss"
 
 echo "== concurrency guard =="
 
@@ -173,8 +223,8 @@ check "UserPromptSubmit with stored verdict -> additionalContext" $? "exit $CODE
 
 fresh_data
 run_hook status-context.sh user-prompt-submit.json
-[ "$CODE" -eq 0 ] && contains "$OUT" 'no sync'
-check "UserPromptSubmit with no verdict -> 'no sync yet' context" $? "exit $CODE out=$OUT"
+[ "$CODE" -eq 0 ] && contains "$OUT" 'no check'
+check "UserPromptSubmit with no verdict -> 'no check yet' context" $? "exit $CODE out=$OUT"
 
 echo "== bootstrap =="
 

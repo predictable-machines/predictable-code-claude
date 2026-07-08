@@ -66,6 +66,13 @@ pc_log() { # event matcher verdict
 # turn's UserPromptSubmit/SessionStart) can surface it without re-running sync.
 pc_last_verdict_file() { printf '%s/last-verdict.json' "$(pc_data_dir)"; }
 
+# The SMT analysis results the engine writes into the project. `findingsAffecting`
+# here (the reachable-now caught faults) is the ground-truth issue count — the
+# verdict counters miss it entirely under `mechanical` (proving off by default).
+pc_analysis_results_file() {
+  printf '%s/.predictable-code/verification/.analysis-results.json' "$(pc_project_dir)"
+}
+
 # SyncResponse is `{constructorName: {…}}`; the constructor name IS the verdict.
 # Returns one of inSync|specViolation|verificationError, or '-' when
 # absent/unreadable.
@@ -81,9 +88,12 @@ pc_verdict_name() { # file
 pc_verdict_summary() { # verdict-name
   case "$1" in
     inSync) printf '%s' 'in sync — the code satisfies its spec' ;;
+    mechanical) printf '%s' 'analyzed — requirements inferred and the code checked' ;;
     specViolation) printf '%s' 'SPEC VIOLATION — one or more requirements are refuted' ;;
-    verificationError) printf '%s' 'VERIFICATION ERROR — the project did not verify cleanly' ;;
-    *) printf '%s' 'no sync has run yet — run: predictable sync' ;;
+    verificationError) printf '%s' 'could not be fully checked this run' ;;
+    inferSpecs) printf '%s' 'source found, no specs yet — inference is the next step' ;;
+    noCode) printf '%s' 'no source code detected to check' ;;
+    *) printf '%s' 'no check has run yet — run: predictable sync' ;;
   esac
 }
 
@@ -141,13 +151,23 @@ pc_session_history_file() { printf '%s/session-history.jsonl' "$(pc_data_dir)"; 
 
 pc_reset_session_history() { rm -f "$(pc_session_history_file)" 2>/dev/null || true; }
 
-# Actionable-issue count for a SyncResponse file, keyed on its verdict. Reads
-# the REAL result fields emitted by `sync --json` (Core.SpecSync.SyncResponse);
-# missing fields degrade to 0. verificationError = real build errors + refuted
-# contracts (counterexamples); inSync = residual refuted/violated (normally 0);
-# specViolation = best-effort from its report (future scaffolding — not yet
-# produced by the pipeline); inferSpecs/noCode are not "issues".
+# Actionable-issue count for a sync. PREFERS the SMT analysis findings — the real
+# caught faults (`findingsAffecting`, reachable-now) in the project's
+# `.analysis-results.json` — because the verdict counters miss them entirely under
+# `mechanical` (proving off by default). Falls back to the SyncResponse verdict
+# counters when no analysis results are present. Missing fields degrade to 0.
 pc_issue_count() { # verdict-file
+  _pc_ar="$(pc_analysis_results_file)"
+  if [ -f "$_pc_ar" ] && pc_have_jq; then
+    _pc_n="$(jq -r '.findingsAffecting // empty' "$_pc_ar" 2>/dev/null)"
+    if [ -n "$_pc_n" ]; then
+      printf '%s' "$_pc_n"
+      return 0
+    fi
+  fi
+  # Fallback: derive from the SyncResponse verdict counters. inSync = residual
+  # refuted/violated (normally 0); verificationError = real errors + counter-
+  # examples; specViolation = best-effort from its report; others are not "issues".
   if [ ! -f "$1" ] || ! pc_have_jq; then
     printf '0'
     return 0

@@ -41,21 +41,47 @@ session).
 | Surface | Behavior |
 | :-- | :-- |
 | **Skill** `/predictable-code:sync` | Runs `predictable sync` and interprets the verdict + findings. |
-| **`SessionStart`** | Ensures the runtime is installed; injects the last verdict as context. |
+| **`SessionStart`** | Ensures the runtime is installed **and the project is initialized** (headless), kicks off a first check **in the background**, and injects the last verdict as context. Self-configures fresh sessions and worktrees with no user action. |
 | **`UserPromptSubmit` / `PreCompact`** | Re-injects the last verdict so the agent always knows the sync state. |
-| **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks** the command unless the project is `inSync`. |
+| **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks only on a broken requirement** (`specViolation`). Every other verdict is advisory (warn, don't block). |
 | **`Stop` / `SubagentStop`** | Advisory turn-end `sync` (skipped if one is already running) so the agent keeps working toward an in-sync state. |
 
 Edits do **not** trigger a sync: the skill runs its own `predictable sync` after
-changing code, and two syncs on one project at once are never allowed — the hook
+changing code, and two syncs on one project at once are never allowed — every hook
 skips when one is already in flight.
 
-Everything is advisory except the **pre-push/commit gate**, the one hard block.
+Everything is advisory except the **pre-push/commit gate**, and even that blocks
+only on a genuine `specViolation`.
 
 The `PreToolUse` hook also **auto-approves the plugin's own `predictable sync`**
 command, so the agent runs it without a permission prompt (only `sync` is
 auto-approved — `git push`/`git commit` still go through the gate, and every
 other command falls through to the host's normal permission flow).
+
+## Worktrees & surfaces
+
+**Git worktrees.** A new worktree is a fresh checkout from `origin/HEAD` — it does
+**not** carry uncommitted or untracked files, and `.predictable-code/` is gitignored
+so it is never copied over. That is fine: the `SessionStart` hook re-initializes and
+re-checks each worktree automatically. If you would rather a worktree **inherit** the
+existing config (and skip re-init), add a [`.worktreeinclude`](https://code.claude.com/docs/en/worktrees)
+to your repo root with:
+
+```text
+.predictable-code/project.json
+```
+
+Do **not** configure a `WorktreeCreate` hook for this — that hook *replaces* git
+worktree creation entirely and disables `.worktreeinclude`; it is meant for non-git
+VCS, not setup.
+
+**Surfaces.** The plugin's command hooks + the `predictable` runtime need a local
+shell, so the loop runs in the **terminal CLI, the desktop app, and the IDE
+extensions** (VS Code / JetBrains run the CLI underneath). The **web app**
+(claude.ai/code) is a sandbox with no local shell or binary, so the sync loop does
+not run there — the plugin degrades to nothing rather than erroring. Artifact views
+(findings / stats / specs dashboards) render in the desktop and web apps; in a plain
+terminal they appear as a link, so the skill always pairs one with a text summary.
 
 ## First run in a project
 

@@ -11,6 +11,12 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-sync.sh",
+            "timeout": 60,
+            "statusMessage": "Setting up Predictable Code and checking your code against its spec…"
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/status-context.sh",
             "timeout": 30
           }
