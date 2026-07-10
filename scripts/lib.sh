@@ -81,7 +81,10 @@ pc_verdict_name() { # file
     printf '%s' '-'
     return 0
   fi
-  jq -r 'keys[0] // "-"' "$1" 2>/dev/null || printf '%s' '-'
+  # `sync --json` now emits an envelope `{schemaVersion, result:{<verdict>:…}, findings}`
+  # (#1236); the verdict lives under `.result`. Fall back to the whole object for the
+  # older bare `{<verdict>:…}` shape so this works with either runtime.
+  jq -r '(.result // .) | keys[0] // "-"' "$1" 2>/dev/null || printf '%s' '-'
 }
 
 # One-line human summary for a verdict name.

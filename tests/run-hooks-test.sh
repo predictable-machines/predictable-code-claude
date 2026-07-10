@@ -193,6 +193,19 @@ rc=1
 [ "$iss" = "7" ] && rc=0
 check "metric counts analysis findingsAffecting (7), not the inSync verdict (0)" "$rc" "issues=$iss"
 
+echo "== envelope verdict parsing (#1236) =="
+
+# pc_verdict_name reads the verdict from the new envelope (.result) and the older
+# bare shape ({<verdict>:…}) alike.
+fresh_data
+printf '{"schemaVersion":1,"result":{"mechanical":{}},"findings":[]}' >"$DATA/env.json"
+printf '{"inSync":{}}' >"$DATA/bare.json"
+v_env=$( . "$ROOT/scripts/lib.sh"; pc_verdict_name "$DATA/env.json" )
+v_bare=$( . "$ROOT/scripts/lib.sh"; pc_verdict_name "$DATA/bare.json" )
+rc=1
+[ "$v_env" = "mechanical" ] && [ "$v_bare" = "inSync" ] && rc=0
+check "pc_verdict_name handles envelope (.result) + bare shapes" "$rc" "env=$v_env bare=$v_bare"
+
 echo "== concurrency guard =="
 
 fresh_data

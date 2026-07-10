@@ -64,9 +64,18 @@ nothing to configure first. Then:
    completes** — so do NOT poll it, do NOT run `sleep` / `until` / `while`, do NOT
    use Glob/other tools to watch it, and do NOT read `.predictable-code/logs/**`
    (internal engine log — see the top rule).
-3. On completion, its captured stdout **is** the `SyncResponse` JSON. Post
+3. On completion, its captured stdout **is** the JSON envelope. Post
    `✅ Check complete`, then report per below. If the run failed, translate the
    problem to plain language — never surface internal / build / engine text.
+
+   The envelope is `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ] }`:
+   - **verdict** = `.result | keys[0]` (older runtimes emit the bare
+     `{ "<verdict>": {…} }` with no `.result` — `jq '(.result // .) | keys[0]'`
+     handles both).
+   - **findings** = `.findings[]` — each is `{file, line, severity ("error"=affecting
+     / "warning"=potential), message (plain-English, already domain-only), category,
+     class}`. **This is the report** — read it straight from the output; do NOT scrape
+     `verification/.analysis-findings/` when `.findings` is present.
 
 **Run only ONE check at a time.** `predictable sync` is exclusive per project —
 never start a second while one is still running (wait for the first to complete).
@@ -86,9 +95,9 @@ does not auto-run a check; you drive it.
 
 ## Interpreting the verdict
 
-`sync --json` prints a `SyncResponse` as a single-key object `{ "<verdict>": { … } }`
-(get the key with `jq -r 'keys[0]'`). Handle **every** verdict — a verdict is NOT
-a failure just because it isn't `inSync`, so never treat one as an error or go
+The verdict is `.result | keys[0]` of the envelope (see step 3; `jq '(.result // .)
+| keys[0]'` also handles the older bare shape). Handle **every** verdict — a verdict
+is NOT a failure just because it isn't `inSync`, so never treat one as an error or go
 hunting for "what went wrong":
 
 - **`mechanical`** — **the default outcome.** Predictable inferred the
@@ -111,38 +120,25 @@ language (never the raw name or engine internals): `mechanical` → "Predictable
 analyzed your code, inferred N requirements, and caught the issues below";
 `inSync` → "your code meets its spec"; `specViolation` → "a requirement is broken
 — here's the failing case"; `verificationError` → "the project couldn't be fully
-checked". Cite the user's own source file + line (from `.source-map.json`), never
-`.lean`.
+checked". Cite each finding's own `file` + `line` (from `.findings[]`), never `.lean`.
 
-## Where the details live
+## Where the findings live
 
-After a run, inspect these under `<project>/verification/`:
+**The findings are in the sync output itself** — the envelope's `.findings[]`
+(`{file, line, severity, message, category, class}`, messages already domain-only).
+Read them straight from `sync`'s stdout; that IS the report. Do **not** scrape
+`verification/.analysis-findings/` or `.analysis-results.json` when `.findings` is
+present — the envelope replaced that.
 
-- `.analysis-results.json` — the SMT analysis results (per-function findings).
-- `.analysis-findings/` — per-declaration finding sidecars.
-- `Code/*.lean` — the translated model.
-- `Code/.source-map.json` — maps each finding back to its source file + line range.
+`severity: "error"` = reachable-now (`class: "affecting"`); `severity: "warning"` =
+future-only (`class: "potential"`). In `mechanical` mode (the default) these findings
+ARE the result — don't wait for proving. If `.findings` is non-empty, Predictable
+analyzed the code — report them; never claim "nothing was processed."
 
-**Inspect them with the Read / Glob / Grep tools, not `cat` / `find` / `ls` via
-Bash.** File reads through those tools don't trigger a Bash permission prompt, so
-the loop stays smooth; shelling out for the same thing makes the user approve
-each command. Likewise, read `sync`'s JSON from its own stdout directly — don't
-redirect it to a temp file and then `cat` the temp file back.
-
-The `verify_*` sidecars are spec-requirement checks; `analyze_*` are general SMT
-analysis. Each is a **real issue Predictable caught**, mapped to its source file +
-line via `.source-map.json`. In `mechanical` mode (the default) these findings ARE
-the result — don't wait for proving or treat their absence-of-proofs as a problem.
-**How you present and act on them depends on how many there are — see "Reporting
-findings" below.**
-
-**Do not read build-status meta-fields in `.analysis-results.json` as a
-pass/fail signal.** `buildSucceeded: false` does NOT mean "nothing was analyzed"
-or "the code couldn't be translated" — it usually just means the mechanical
-translation fell back to the LLM. What matters is the findings: use
-`findingsAffecting` / `findingsPotential` and the `.analysis-findings/` sidecars.
-If findings exist, Predictable analyzed the code — report them; never claim "0 of
-N functions processed" when `results` is non-empty.
+_Fallback only for an older runtime with no `.findings` field:_ the per-declaration
+sidecars under `<project>/verification/.analysis-findings/` (+ `Code/.source-map.json`
+for file/line). Read those with the Read / Glob / Grep tools, not `cat`/`find`/`ls`.
+Never read the build-status meta-field `buildSucceeded` as a pass/fail signal.
 
 ## Reporting findings (scales from 1 to thousands)
 
@@ -154,17 +150,13 @@ decides.**
 **Rank most-critical-first, always, by tier:**
 
 1. **Broken contracts** — a requirement is refuted with a counterexample
-   (`specViolation`, and `verify_*` findings). Usually a small set; surface first.
-2. **Reachable now** — faults an existing call site can already trigger
-   (`findingsAffecting`: null-dereference, divide-by-zero, overflow, index-out-of-
-   range…).
-3. **Future-only** — a fault only a hypothetical future caller could reach
-   (`findingsPotential`).
+   (verdict `specViolation`). Usually a small set; surface first.
+2. **Reachable now** — findings with `severity: "error"` (`class: "affecting"`):
+   null-dereference, divide-by-zero, overflow, index-out-of-range…
+3. **Future-only** — findings with `severity: "warning"` (`class: "potential"`).
 
-Tie-break within a tier by category severity and blast radius (how many call sites
-/ how central the function). When present, read the aggregate `summary`
-(counts by tier / category / file) from the sync output instead of loading every
-sidecar.
+Tie-break within a tier by `category` and blast radius (how central the function).
+Group/count from `.findings[]` (by `severity`, `category`, `file`) — no sidecars.
 
 **Small result (≲ 15 findings):** just list them inline — plain language, grouped
 by the tiers above, each with `file:line` and a one-line description + a proposed
@@ -206,10 +198,9 @@ summary. Offer them (don't force them):
 
 How you end a check depends on the result — this is mandatory:
 
-- **Issues were found** — the verdict is `specViolation`, or a `mechanical` /
-  `verificationError` run with one or more findings (any of: `findingsAffecting` or
-  `findingsPotential` > 0, `.analysis-findings/` sidecars present, or requirements
-  violated): you **MUST** end your turn by calling the **`AskUserQuestion` tool**
+- **Issues were found** — the verdict is `specViolation`, or `.findings[]` is
+  non-empty, or requirements were violated: you **MUST** end your turn by calling
+  the **`AskUserQuestion` tool**
   (never a free-text "would you like me to…?") offering the next step, e.g.:
   - **Fix the critical ones** (recommended)
   - **Fix all the issues**
