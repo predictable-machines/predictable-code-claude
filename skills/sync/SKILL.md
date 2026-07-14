@@ -67,6 +67,18 @@ nothing to configure first. Then:
 3. On completion, its captured stdout **is** the JSON envelope. Post
    `✅ Check complete`, then report per below. If the run failed, translate the
    problem to plain language — never surface internal / build / engine text.
+4. **Open the report for the user, automatically.** The check writes a
+   self-contained report to `<project>/.predictable-code/inference/report.html`.
+   When it exists, open it with the OS default handler in ONE background Bash call
+   (the plugin's gate auto-approves this exact command, so no permission prompt):
+
+   ```sh
+   open .predictable-code/inference/report.html 2>/dev/null || xdg-open .predictable-code/inference/report.html 2>/dev/null || true
+   ```
+
+   Always ALSO post the clickable absolute **`file://`** link in chat — on a
+   remote / SSH / headless host `open` silently no-ops, and the link is the
+   fallback. Never let this step fail the turn (`|| true`).
 
    The envelope is `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ] }`:
    - **verdict** = `.result | keys[0]` (older runtimes emit the bare

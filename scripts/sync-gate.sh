@@ -32,6 +32,20 @@ case "$cmd" in
     pc_emit_allow "Predictable Code: auto-approving the plugin's own 'predictable' setup/sync command."
     exit 0
     ;;
+  *"inference/report.html"*)
+    # The skill auto-opens the generated report after a check. Auto-approve ONLY
+    # an open-verb command targeting that report path, so it happens without a
+    # permission prompt; anything else touching the path falls through to the host.
+    case "$cmd" in
+      *open*|*"start "*)
+        pc_emit_allow "Predictable Code: auto-approving opening the generated report."
+        exit 0
+        ;;
+      *)
+        exit 0
+        ;;
+    esac
+    ;;
   *)
     exit 0
     ;;

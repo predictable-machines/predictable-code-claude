@@ -105,6 +105,18 @@ rc=1
 contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
 check "predictable init -> auto-allow (setup runs without prompt)" "$rc" "exit $CODE out=$OUT"
 
+fresh_data
+run_hook sync-gate.sh pre-tool-use-open-report.json
+rc=1
+contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
+check "open report.html -> auto-allow (report opens without prompt)" "$rc" "exit $CODE out=$OUT"
+
+fresh_data
+run_hook sync-gate.sh pre-tool-use-rm-report.json
+rc=1
+[ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
+check "rm report.html -> passthrough (not auto-allowed, host decides)" "$rc" "exit $CODE out=$OUT"
+
 echo "== sync-run =="
 
 # A non-Stop event exercises emit_advisory's additionalContext fallback branch.
