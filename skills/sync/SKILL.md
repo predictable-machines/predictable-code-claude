@@ -144,8 +144,8 @@ Never read the build-status meta-field `buildSucceeded` as a pass/fail signal.
 
 Predictable runs on **large** projects — a check can return **thousands** of
 findings. Never dump them all into chat, and never build an `AskUserQuestion` with
-hundreds of options. Two surfaces, two roles: **an Artifact enumerates, a question
-decides.**
+hundreds of options. Two surfaces, two roles: **the generated report enumerates, a
+question decides.**
 
 **Rank most-critical-first, always, by tier:**
 
@@ -164,11 +164,16 @@ fix. No Artifact, no funnel.
 
 **Large result (more than that, up to thousands):**
 
-1. **Generate an Artifact "findings dashboard"** (self-contained HTML) — the full,
-   grouped, scrollable enumeration (tier → category → file, with counts). This is
-   where the user *sees* everything; it scales to thousands. In a plain terminal
-   the Artifact shows as a link, so also post a short **text rollup** (the tier /
-   category counts) as the at-a-glance summary.
+1. **Point the user at the report Predictable already generated.** Every check
+   writes a self-contained HTML report (full grouped, scrollable enumeration; no
+   external assets) to `<project>/.predictable-code/inference/report.html`. Give
+   the user a **clickable absolute `file://` link** to open it — that is the report
+   surface that works everywhere (terminal, IDE, Desktop). Do **not** fabricate
+   your own Artifact for this: an Artifact does not render as an openable link in a
+   terminal / IDE, and the report already exists on disk. Always ALSO post a short
+   **text rollup** (the tier / category counts) inline as the at-a-glance summary.
+   On Desktop/web you MAY *additionally* publish an Artifact for a richer hosted
+   view — but never INSTEAD of the `file://` link.
 2. **Then drive a short funnel of `AskUserQuestion` decisions — most-critical
    first, each option a BATCH (never an individual finding), always with a
    recommended default.** Use `multiSelect` where several batches can be picked:
@@ -182,17 +187,21 @@ fix. No Artifact, no funnel.
    handled in bounded rounds that always show the current most-critical — never one
    giant edit.
 
-## Rich views (Artifacts)
+## Rich views (the generated report + optional Artifacts)
 
-Artifacts are self-contained HTML pages that render in the Desktop and web apps;
-in a plain terminal they appear as a link, so always pair one with a short text
-summary. Offer them (don't force them):
+The **primary** rich view is the report Predictable writes on every check —
+`<project>/.predictable-code/inference/report.html` — a self-contained page with
+the findings and the inferred requirements per function. Surface it as a clickable
+absolute `file://` link; it opens in the terminal, the IDE, and the browser. That
+is what the user opens to *see* everything.
 
-- **Findings dashboard** — the large-result enumeration above.
+Artifacts are an OPTIONAL extra for Desktop/web only (they do NOT render as an
+openable link in a plain terminal / IDE), so never rely on one as the sole report
+surface — always give the `file://` link first, and pair any Artifact with a short
+text summary. When it helps, you MAY additionally offer (don't force):
+
 - **Stats / branding dashboard** — "Predictable caught N issues, you fixed M, all
   proven against the spec" (see the metric below). Good at an `inSync` finish.
-- **Specs / requirements viewer** — the inferred requirements per function, for a
-  user who wants to see *what* is being checked.
 
 ## Closing a check — you MUST ask (only when there are issues)
 
@@ -206,6 +215,11 @@ How you end a check depends on the result — this is mandatory:
   - **Fix all the issues**
   - **Let me pick which**
   - **Just the report for now**
+
+  **Never add a "Something else" / "Other" / "None of these" / free-text option**
+  to any `AskUserQuestion` (here or in the funnel) — the tool ALWAYS appends its
+  own "Other" choice for custom input, so an explicit one is a duplicate. List only
+  concrete, mutually-exclusive next steps and let the built-in "Other" cover the rest.
 
   At scale this is the funnel above (one question per tier, batched options); for a
   handful of issues, a single `AskUserQuestion` with these options is enough.
