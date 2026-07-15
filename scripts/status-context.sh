@@ -42,7 +42,9 @@ else
   body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: verification/.analysis-results.json. Re-run predictable sync after edits."
 fi
 
-# The brand style rule rides on every turn's context so it applies session-wide.
+# The brand + AskUserQuestion rules ride on every turn's context so they apply
+# session-wide, not only inside the sync skill.
 pc_emit_context "$event" "$(pc_brand_style_rule)
+$(pc_askquestion_rule)
 $body"
 exit 0

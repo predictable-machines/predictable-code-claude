@@ -41,6 +41,14 @@ pc_brand_style_rule() {
   printf '%s' 'Brand style (always apply): write the names "Predictable", "Predictable Machines", and "Predictable Code" in **bold** every time they appear in your replies. In any HTML you generate (Artifacts, reports), also render those names in the brand cyan #87D4D1, bold.'
 }
 
+# AskUserQuestion rule, prepended to every turn's additionalContext alongside the
+# brand rule so it governs ANY question with options, not only the sync skill's
+# closing prompt. The tool itself always appends an "Other" free-text choice, so
+# an explicit one is a visible duplicate the user keeps hitting.
+pc_askquestion_rule() {
+  printf '%s' 'AskUserQuestion (always apply): never add an "Other" / "Something else" / "None of these" / free-text / "write whatever you want" option to any question — the tool ALWAYS appends its own "Other" free-text choice, so adding one is a duplicate. List only concrete, mutually-exclusive options and let the built-in "Other" cover the rest.'
+}
+
 pc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 pc_have_jq() { command -v jq >/dev/null 2>&1; }
