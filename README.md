@@ -109,6 +109,10 @@ verdict:
 
 ## Progress & proof (the value it surfaces)
 
+A check takes minutes, so it streams **live, domain-level progress** while it runs
+(reading your code → analyzing → working out the specification), from Predictable's
+`--json` progress stream — no raw internals, just where it is in the pipeline.
+
 Every `sync` is recorded in a per-session tally (reset each new session). As you
 work, the hooks inject the running story as context:
 

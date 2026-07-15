@@ -53,27 +53,42 @@ without a permission prompt (`git push`/`git commit` still go through the gate).
 
 ### 1. Run the check
 
-`sync` takes minutes and `--json` prints nothing until it finishes. Run it in the
-**background** with the Bash tool (`run_in_background: true`) — this exact command:
+`sync` takes minutes. Run it in the **background** with the Bash tool
+(`run_in_background: true`), piping Predictable's progress stream through a
+formatter so the run shows **live, domain-level progress** while it works — this
+exact command:
 
 ```sh
-predictable sync --json --claude
+predictable sync --json --claude 2>&1 1>/tmp/pc-sync-envelope.json \
+  | jq --unbuffered -jR '
+      fromjson? // empty
+      | select(.event == "phase")
+      | ({ translation: { start: "🔄 Reading your code…\n" },
+           analysis:    { start: "🔎 Analyzing your code for issues…\n",
+                          done:  "✓ Analyzed \(.functions // "?") function(s) — \(.findings // 0) potential issue(s)\n",
+                          error: "⚠️ Analysis hit a snag — continuing…\n" },
+           inference:   { start: "🧪 Working out the specification…\n",
+                          done:  "✓ Specification inferred\n" } }[.phase][.state]) // empty'
 ```
 
-`--claude` auto-initializes the project with Claude defaults if needed, so there is
-nothing to configure first. Then:
+How it works: Predictable emits one progress event per phase (as JSON lines on
+stderr); the `jq` filter turns each into a friendly line, so the background task's
+own output IS the live progress the user sees — no internals leak, and you never
+narrate it yourself. `--claude` auto-initializes the project if needed. The
+**verdict + findings envelope** (stdout) is written to `/tmp/pc-sync-envelope.json`,
+kept separate from the progress. If `jq` isn't installed the progress just won't
+render — the envelope file is still written; read it anyway. Then:
 
-1. Post one or two short, emoji-led, domain-level lines so the user knows it's
-   working — nothing derived from internals:
-   - 🔄 Reading your code…
-   - 🧪 Verifying your code against its spec — this takes a few minutes…
+1. Before launching, post ONE short domain-level line (e.g. 🔄 Reading your code…);
+   the live progress takes over from there. Don't invent internals.
 2. **Wait for it to finish. You are notified automatically when a background task
    completes** — so do NOT poll it, do NOT run `sleep` / `until` / `while`, do NOT
    use Glob/other tools to watch it, and do NOT read `.predictable-code/logs/**`
    (internal engine log — see the top rule).
-3. On completion, its captured stdout **is** the JSON envelope. Post
-   `✅ Check complete`, then report per below. If the run failed, translate the
-   problem to plain language — never surface internal / build / engine text.
+3. On completion, read the envelope from **`/tmp/pc-sync-envelope.json`** — that
+   file **is** the JSON envelope. Post `✅ Check complete`, then report per below.
+   If the run failed (no envelope written), translate the problem to plain
+   language — never surface internal / build / engine text.
 4. **Open the report for the user, automatically.** The check writes a
    self-contained report to `<project>/.predictable-code/inference/report.html`.
    When it exists, open it with the OS default handler in ONE background Bash call
@@ -87,13 +102,14 @@ nothing to configure first. Then:
    remote / SSH / headless host `open` silently no-ops, and the link is the
    fallback. Never let this step fail the turn (`|| true`).
 
-   The envelope is `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ] }`:
+   The envelope in `/tmp/pc-sync-envelope.json` is
+   `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ] }`:
    - **verdict** = `.result | keys[0]` (older runtimes emit the bare
-     `{ "<verdict>": {…} }` with no `.result` — `jq '(.result // .) | keys[0]'`
-     handles both).
+     `{ "<verdict>": {…} }` with no `.result` — `jq '(.result // .) | keys[0]'
+     /tmp/pc-sync-envelope.json` handles both).
    - **findings** = `.findings[]` — each is `{file, line, severity ("error"=affecting
      / "warning"=potential), message (plain-English, already domain-only), category,
-     class}`. **This is the report** — read it straight from the output; do NOT scrape
+     class}`. **This is the report** — read it straight from that file; do NOT scrape
      `verification/.analysis-findings/` when `.findings` is present.
 
 **Run only ONE check at a time.** `predictable sync` is exclusive per project —
@@ -143,11 +159,11 @@ checked". Cite each finding's own `file` + `line` (from `.findings[]`), never `.
 
 ## Where the findings live
 
-**The findings are in the sync output itself** — the envelope's `.findings[]`
-(`{file, line, severity, message, category, class}`, messages already domain-only).
-Read them straight from `sync`'s stdout; that IS the report. Do **not** scrape
-`verification/.analysis-findings/` or `.analysis-results.json` when `.findings` is
-present — the envelope replaced that.
+**The findings are in the sync envelope itself** — `.findings[]`
+(`{file, line, severity, message, category, class}`, messages already domain-only)
+in `/tmp/pc-sync-envelope.json`. Read them straight from that file; that IS the
+report. Do **not** scrape `verification/.analysis-findings/` or
+`.analysis-results.json` when `.findings` is present — the envelope replaced that.
 
 `severity: "error"` = reachable-now (`class: "affecting"`); `severity: "warning"` =
 future-only (`class: "potential"`). In `mechanical` mode (the default) these findings

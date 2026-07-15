@@ -117,6 +117,26 @@ rc=1
 [ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
 check "rm report.html -> passthrough (not auto-allowed, host decides)" "$rc" "exit $CODE out=$OUT"
 
+echo "== progress formatter (#1237 NDJSON -> friendly lines) =="
+
+if command -v jq >/dev/null 2>&1; then
+  PROG_OUT=$(printf '%s\n' \
+    '{"v":1,"event":"phase","phase":"translation","state":"start","files":42}' \
+    'a schema-drift warning, not json' \
+    '{"v":1,"event":"phase","phase":"analysis","state":"done","functions":30,"findings":7}' \
+    '{"v":1,"event":"phase","phase":"inference","state":"done"}' \
+    | jq --unbuffered -jR -f "$ROOT/scripts/progress.jq" 2>/dev/null)
+  rc=1
+  contains "$PROG_OUT" 'Reading your code' \
+    && contains "$PROG_OUT" 'Analyzed 30 function(s) — 7 potential issue(s)' \
+    && contains "$PROG_OUT" 'Specification inferred' \
+    && ! contains "$PROG_OUT" 'not json' \
+    && rc=0
+  check "progress.jq maps phase events to domain lines, drops non-JSON" "$rc" "out=$PROG_OUT"
+else
+  check "progress.jq (skipped — jq not installed)" 0 ""
+fi
+
 echo "== sync-run =="
 
 # A non-Stop event exercises emit_advisory's additionalContext fallback branch.
