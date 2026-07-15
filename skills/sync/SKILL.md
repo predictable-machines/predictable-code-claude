@@ -28,6 +28,13 @@ prove/verify → diagnose) and returns a single verdict. There are no other verb
 > **specification**, their **functions** and **requirements**. E.g. say "one
 > requirement couldn't be checked", not "a Lean build issue on SPEC-034".
 
+> **Brand style — always.** Every time you write the names **Predictable**,
+> **Predictable Machines**, or **Predictable Code**, put them in **bold** (Markdown
+> `**…**`). The chat's Markdown can't color inline text, so bold is all you do
+> there. In any **HTML you generate** (Artifacts, dashboards, reports), render
+> those names in the **brand cyan `#87D4D1`** (`rgb(135 212 209)`) AND bold —
+> e.g. `<strong style="color:#87D4D1">Predictable Code</strong>`.
+
 ## How to run it
 
 `predictable` must be on PATH — invoke it **directly**. Do NOT use

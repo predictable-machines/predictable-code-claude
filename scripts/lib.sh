@@ -32,6 +32,15 @@ pc_predictable_bin() {
   printf '%s' "${CLAUDE_PLUGIN_ROOT:-.}/bin/predictable"
 }
 
+# Brand style rule, prepended to EVERY turn's additionalContext (status-context)
+# so it applies session-wide, not only inside the sync skill. Bold renders in the
+# chat's Markdown; the brand cyan (#87D4D1, rgb(135 212 209)) only renders in HTML
+# we control (Artifacts / reports) — the terminal/IDE Markdown renderer cannot
+# color inline chat text — so the cyan is scoped there.
+pc_brand_style_rule() {
+  printf '%s' 'Brand style (always apply): write the names "Predictable", "Predictable Machines", and "Predictable Code" in **bold** every time they appear in your replies. In any HTML you generate (Artifacts, reports), also render those names in the brand cyan #87D4D1, bold.'
+}
+
 pc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 pc_have_jq() { command -v jq >/dev/null 2>&1; }

@@ -33,12 +33,16 @@ pc_log "$event" status-context "$verdict"
 # bare verdict / "no sync yet" line before any sync has run this session.
 summary="$(pc_session_summary)"
 if [ -n "$summary" ]; then
-  pc_emit_context "$event" "$summary"
+  body="$summary"
 elif ! pc_is_configured; then
-  pc_emit_context "$event" "Predictable Code isn't set up here yet — it configures automatically on the first check (run the /predictable-code:sync skill, or it starts on its own), then verifies the code against its spec."
+  body="Predictable Code isn't set up here yet — it configures automatically on the first check (run the /predictable-code:sync skill, or it starts on its own), then verifies the code against its spec."
 elif [ "$verdict" = "-" ]; then
-  pc_emit_context "$event" "Predictable Code: $(pc_verdict_summary "$verdict") to check this project against its spec."
+  body="Predictable Code: $(pc_verdict_summary "$verdict") to check this project against its spec."
 else
-  pc_emit_context "$event" "Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: verification/.analysis-results.json. Re-run predictable sync after edits."
+  body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: verification/.analysis-results.json. Re-run predictable sync after edits."
 fi
+
+# The brand style rule rides on every turn's context so it applies session-wide.
+pc_emit_context "$event" "$(pc_brand_style_rule)
+$body"
 exit 0
