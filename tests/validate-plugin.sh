@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # L2 plugin validation (no LLM, no bundle): every JSON parses, the manifest
-# declares exactly the intended surface (one skill, hooks, NO userConfig, NO MCP
-# server), and — privacy-critical — the repo carries NO Predictable source.
+# declares exactly the intended surface (one skill, the report command, hooks, NO
+# userConfig, NO MCP server), and — privacy-critical — the repo carries NO
+# Predictable source.
 set -u
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." >/dev/null 2>&1 && pwd)
@@ -60,6 +61,11 @@ echo "== single skill =="
 skills=$(find "$ROOT/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
 if [ "$skills" = "1" ]; then ok "exactly one skill (sync)"; else bad "expected 1 skill, found $skills"; fi
 if [ -f "$ROOT/skills/sync/SKILL.md" ]; then ok "skill is skills/sync"; else bad "skills/sync/SKILL.md missing"; fi
+
+echo "== slash commands =="
+if [ -f "$ROOT/commands/report.md" ]; then ok "command: /predictable-code:report"; else bad "commands/report.md missing"; fi
+grep -qE '^description: .+' "$ROOT/commands/report.md" 2>/dev/null
+judge $? "report command has a description" "report command frontmatter missing description"
 
 echo "== no bundled agents =="
 if [ ! -d "$ROOT/agents" ]; then ok "no agents/ dir"; else bad "agents/ present — none should ship"; fi

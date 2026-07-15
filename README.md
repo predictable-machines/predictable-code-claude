@@ -41,6 +41,7 @@ session).
 | Surface | Behavior |
 | :-- | :-- |
 | **Skill** `/predictable-code:sync` | Runs `predictable sync` and interprets the verdict + findings. |
+| **Command** `/predictable-code:report` | Opens the generated HTML report (findings + inferred requirements) in your browser, and prints the `file://` link. |
 | **`SessionStart`** | Ensures the runtime is installed **and the project is initialized** (headless), kicks off a first check **in the background**, and injects the last verdict as context. Self-configures fresh sessions and worktrees with no user action. |
 | **`UserPromptSubmit` / `PreCompact`** | Re-injects the last verdict so the agent always knows the sync state. |
 | **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks only on a broken requirement** (`specViolation`). Every other verdict is advisory (warn, don't block). |
@@ -53,10 +54,10 @@ skips when one is already in flight.
 Everything is advisory except the **pre-push/commit gate**, and even that blocks
 only on a genuine `specViolation`.
 
-The `PreToolUse` hook also **auto-approves the plugin's own `predictable sync`**
-command, so the agent runs it without a permission prompt (only `sync` is
-auto-approved — `git push`/`git commit` still go through the gate, and every
-other command falls through to the host's normal permission flow).
+The `PreToolUse` hook also **auto-approves the plugin's own commands** — running
+`predictable sync` and opening the generated report — so the agent runs them
+without a permission prompt (`git push`/`git commit` still go through the gate, and
+every other command falls through to the host's normal permission flow).
 
 ## Worktrees & surfaces
 
