@@ -271,41 +271,47 @@ plan with the user via `AskUserQuestion` (the batch/strategy, per the funnel —
 one prompt per finding). After applying, re-run the check to confirm the batch
 cleared (that is the **Re-check** step above). Never bulk-rewrite without an OK.
 
-## Agent-verified: recording a reviewed fix
+## Agent-verified: you finish what Predictable can't
 
-Predictable Analysis is sound but incomplete: for some fixes it **cannot
-mechanically confirm** the issue is gone (loops, recursion, unmodeled library
-state like `Map.put`, non-linear arithmetic). After you fix such an issue and
-re-check, the finding may still show as a **potential issue** — not because your
-fix is wrong, but because the analyzer can't decide it.
+Predictable Analysis is sound but incomplete. For some fixes it **cannot
+mechanically decide** the issue is gone — loops, recursion, unmodeled library
+state (`List`/`Map` contents), non-linear arithmetic. After you fix such a
+finding and re-check, it may still show as a **potential issue**: not because
+your fix is wrong, but because the product can't prove or refute it.
 
-When that happens (the finding did NOT clear and was NOT refuted with a
-counterexample — i.e. Predictable is *indeterminate*), you MAY record an
-**agent-verified** result:
+**That gap is yours to close, automatically — never hand it back to the user as a
+question.** When the product can't verify a fix, you do the verification work.
 
-1. **Self-review your own change against the original finding.** Structured and
-   honest: restate the reported issue, show how the code now prevents it, and
-   check the edge cases the finding named. Only proceed if you genuinely conclude
-   the fix resolves it.
-2. **On a positive self-review, promote it** (the gate auto-approves this):
+After every fix, re-check and act on each requirement's **real status**:
 
-   ```sh
-   predictable specs requirements agent-verify <spec-id> <req-id> --rationale "<why your fix resolves the finding>"
-   ```
+- **Cleared (`verified`)** — Predictable proved it. Nothing to do.
+- **Refuted (`violated`)** — Predictable found a counterexample. Your fix is
+  wrong or incomplete: **fix the code again.** Never agent-verify a refutation.
+- **Still a `potential issue` (neither proved nor refuted)** — the product
+  genuinely can't decide it, so **you must**, on your own, without asking:
 
-   Get the `<spec-id>`/`<req-id>` from the specs viewer or `predictable specs details`.
-   The command records your rationale to an audit trail and sets the status.
+  1. **Self-review your change against the original finding.** Restate the
+     reported issue, show how the code now prevents it, and check every edge case
+     the finding named. Proceed only if you genuinely conclude the fix resolves it.
+  2. **On a positive self-review, record it** (auto-approved — no permission prompt):
 
-3. **Disclose it plainly, never as a real verification.** Tell the user: *"I
-   reviewed my fix and marked this **agent-reviewed** — a softer guarantee than
-   Predictable Code's formal verification, which couldn't decide this one
-   mechanically."* Never call it "verified", "proven", or "safe".
+     ```sh
+     predictable specs requirements agent-verify <spec-id> <req-id> --rationale "<why your fix resolves the finding>"
+     ```
 
-Boundaries: the command **refuses** if Predictable already decided the
-requirement (a real `verified` or a `violated` refutation always wins — if it's
-refuted, fix the code, don't agent-verify), and refuses entirely in strict mode
-(`PREDICTABLE_TRUST_AGENT_VERIFICATION` off), in which case just leave it as a
-potential issue. Only do this for a fix **you** made and reviewed this session.
+     Get `<spec-id>`/`<req-id>` from `predictable specs details` or the specs
+     viewer. The command writes your rationale to an audit trail and sets the status.
+  3. **Disclose it plainly, never as a real verification.** Tell the user:
+     *"Predictable couldn't decide this one mechanically, so I reviewed my own fix
+     and marked it **agent-reviewed** — a softer guarantee than its formal
+     verification."* Never call it "verified", "proven", or "safe".
+
+Do this for **every** such requirement, every session — it is not optional and it
+is not a question for the user. The only requirements you never agent-verify: ones
+the product already decided (a real `verified` or `violated` verdict always wins),
+and — in strict mode (`PREDICTABLE_TRUST_AGENT_VERIFICATION` off) — the command
+refuses, so leave those as potential issues. Only agent-verify a fix **you** made
+and reviewed this session.
 
 ## Progress the hooks surface
 
