@@ -89,18 +89,19 @@ render — the envelope file is still written; read it anyway. Then:
    file **is** the JSON envelope. Post `✅ Check complete`, then report per below.
    If the run failed (no envelope written), translate the problem to plain
    language — never surface internal / build / engine text.
-4. **Open the report for the user, automatically.** The check writes a
-   self-contained report to `<project>/.predictable-code/inference/report.html`.
-   When it exists, open it with the OS default handler in ONE background Bash call
-   (the plugin's gate auto-approves this exact command, so no permission prompt):
+4. **Open the report for the user, automatically.** Regenerate and open the
+   single HTML surface — the **specs viewer** — in ONE background Bash call (the
+   plugin's gate auto-approves this exact command, so no permission prompt):
 
    ```sh
-   open .predictable-code/inference/report.html 2>/dev/null || xdg-open .predictable-code/inference/report.html 2>/dev/null || true
+   predictable specs view 2>/dev/null || true
    ```
 
-   Always ALSO post the clickable absolute **`file://`** link in chat — on a
-   remote / SSH / headless host `open` silently no-ops, and the link is the
-   fallback. Never let this step fail the turn (`|| true`).
+   `predictable specs view` writes the fresh viewer (findings + the inferred
+   requirements per function, with every status distinctly rendered) and opens it
+   in the browser, printing its `file://` path. Post that path in chat too — on a
+   remote / SSH / headless host the browser open silently no-ops, and the link is
+   the fallback. Never let this step fail the turn (`|| true`).
 
    The envelope in `/tmp/pc-sync-envelope.json` is
    `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ] }`:
@@ -199,16 +200,16 @@ fix. No Artifact, no funnel.
 
 **Large result (more than that, up to thousands):**
 
-1. **Point the user at the report Predictable already generated.** Every check
-   writes a self-contained HTML report (full grouped, scrollable enumeration; no
-   external assets) to `<project>/.predictable-code/inference/report.html`. Give
-   the user a **clickable absolute `file://` link** to open it — that is the report
-   surface that works everywhere (terminal, IDE, Desktop). Do **not** fabricate
-   your own Artifact for this: an Artifact does not render as an openable link in a
-   terminal / IDE, and the report already exists on disk. Always ALSO post a short
-   **text rollup** (the tier / category counts) inline as the at-a-glance summary.
-   On Desktop/web you MAY *additionally* publish an Artifact for a richer hosted
-   view — but never INSTEAD of the `file://` link.
+1. **Open the specs viewer Predictable generates.** Run `predictable specs view`
+   (the gate auto-approves it): it writes the single self-contained HTML surface
+   (full grouped, scrollable enumeration; no external assets) and opens it,
+   printing its `file://` path. Post that **clickable `file://` link** — it works
+   everywhere (terminal, IDE, Desktop). Do **not** fabricate your own Artifact for
+   this: an Artifact does not render as an openable link in a terminal / IDE, and
+   the viewer already exists on disk. Always ALSO post a short **text rollup** (the
+   tier / category counts) inline as the at-a-glance summary. On Desktop/web you
+   MAY *additionally* publish an Artifact for a richer hosted view — but never
+   INSTEAD of the `file://` link.
 2. **Then drive a short funnel of `AskUserQuestion` decisions — most-critical
    first, each option a BATCH (never an individual finding), always with a
    recommended default.** Use `multiSelect` where several batches can be picked:
@@ -224,11 +225,11 @@ fix. No Artifact, no funnel.
 
 ## Rich views (the generated report + optional Artifacts)
 
-The **primary** rich view is the report Predictable writes on every check —
-`<project>/.predictable-code/inference/report.html` — a self-contained page with
-the findings and the inferred requirements per function. Surface it as a clickable
-absolute `file://` link; it opens in the terminal, the IDE, and the browser. That
-is what the user opens to *see* everything.
+The **primary** rich view is the **specs viewer** Predictable regenerates on every
+check — open it with `predictable specs view`, a self-contained page with the
+findings and the inferred requirements per function (every status distinctly
+rendered). It prints a `file://` path; surface that link. It opens in the terminal,
+the IDE, and the browser. That is what the user opens to *see* everything.
 
 Artifacts are an OPTIONAL extra for Desktop/web only (they do NOT render as an
 openable link in a plain terminal / IDE), so never rely on one as the sole report
@@ -292,7 +293,7 @@ counterexample — i.e. Predictable is *indeterminate*), you MAY record an
    predictable specs requirements agent-verify <spec-id> <req-id> --rationale "<why your fix resolves the finding>"
    ```
 
-   Get the `<spec-id>`/`<req-id>` from the report or `predictable specs details`.
+   Get the `<spec-id>`/`<req-id>` from the specs viewer or `predictable specs details`.
    The command records your rationale to an audit trail and sets the status.
 
 3. **Disclose it plainly, never as a real verification.** Tell the user: *"I

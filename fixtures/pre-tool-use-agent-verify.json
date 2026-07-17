@@ -5,6 +5,6 @@
   "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
   "tool_input": {
-    "command": "open .predictable-code/inference/report.html 2>/dev/null || xdg-open .predictable-code/inference/report.html 2>/dev/null || true"
+    "command": "predictable specs requirements agent-verify SPEC-001 REQ-0001 --rationale \"reviewed\""
   }
 }

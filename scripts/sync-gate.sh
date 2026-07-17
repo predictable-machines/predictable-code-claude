@@ -38,19 +38,11 @@ case "$cmd" in
     pc_emit_allow "Predictable Code: auto-approving recording an agent-reviewed fix."
     exit 0
     ;;
-  *"inference/report.html"*)
-    # The skill auto-opens the generated report after a check. Auto-approve ONLY
-    # an open-verb command targeting that report path, so it happens without a
-    # permission prompt; anything else touching the path falls through to the host.
-    case "$cmd" in
-      *open*|*"start "*)
-        pc_emit_allow "Predictable Code: auto-approving opening the generated report."
-        exit 0
-        ;;
-      *)
-        exit 0
-        ;;
-    esac
+  *predictable*"specs view"*)
+    # The skill opens the specs viewer with `predictable specs view` (it
+    # regenerates and opens the single HTML surface); auto-approve it.
+    pc_emit_allow "Predictable Code: auto-approving opening the specs viewer."
+    exit 0
     ;;
   *)
     exit 0
