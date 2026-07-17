@@ -270,6 +270,42 @@ plan with the user via `AskUserQuestion` (the batch/strategy, per the funnel —
 one prompt per finding). After applying, re-run the check to confirm the batch
 cleared (that is the **Re-check** step above). Never bulk-rewrite without an OK.
 
+## Agent-verified: recording a reviewed fix
+
+Predictable Analysis is sound but incomplete: for some fixes it **cannot
+mechanically confirm** the issue is gone (loops, recursion, unmodeled library
+state like `Map.put`, non-linear arithmetic). After you fix such an issue and
+re-check, the finding may still show as a **potential issue** — not because your
+fix is wrong, but because the analyzer can't decide it.
+
+When that happens (the finding did NOT clear and was NOT refuted with a
+counterexample — i.e. Predictable is *indeterminate*), you MAY record an
+**agent-verified** result:
+
+1. **Self-review your own change against the original finding.** Structured and
+   honest: restate the reported issue, show how the code now prevents it, and
+   check the edge cases the finding named. Only proceed if you genuinely conclude
+   the fix resolves it.
+2. **On a positive self-review, promote it** (the gate auto-approves this):
+
+   ```sh
+   predictable specs requirements agent-verify <spec-id> <req-id> --rationale "<why your fix resolves the finding>"
+   ```
+
+   Get the `<spec-id>`/`<req-id>` from the report or `predictable specs details`.
+   The command records your rationale to an audit trail and sets the status.
+
+3. **Disclose it plainly, never as a real verification.** Tell the user: *"I
+   reviewed my fix and marked this **agent-reviewed** — a softer guarantee than
+   Predictable Code's formal verification, which couldn't decide this one
+   mechanically."* Never call it "verified", "proven", or "safe".
+
+Boundaries: the command **refuses** if Predictable already decided the
+requirement (a real `verified` or a `violated` refutation always wins — if it's
+refuted, fix the code, don't agent-verify), and refuses entirely in strict mode
+(`PREDICTABLE_TRUST_AGENT_VERIFICATION` off), in which case just leave it as a
+potential issue. Only do this for a fix **you** made and reviewed this session.
+
 ## Progress the hooks surface
 
 As you re-run the check across a session, the plugin tracks a per-session tally of

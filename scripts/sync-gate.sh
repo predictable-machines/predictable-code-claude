@@ -32,6 +32,12 @@ case "$cmd" in
     pc_emit_allow "Predictable Code: auto-approving the plugin's own 'predictable' setup/sync command."
     exit 0
     ;;
+  *predictable*"agent-verify"*)
+    # The skill records a reviewed fix via `predictable specs requirements
+    # agent-verify` after its own self-review; auto-approve that write.
+    pc_emit_allow "Predictable Code: auto-approving recording an agent-reviewed fix."
+    exit 0
+    ;;
   *"inference/report.html"*)
     # The skill auto-opens the generated report after a check. Auto-approve ONLY
     # an open-verb command targeting that report path, so it happens without a
