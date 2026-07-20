@@ -299,22 +299,23 @@ After every fix, re-check and act on each requirement's **real status**:
      predictable specs requirements agent-verify <spec-id> <req-id> --rationale "<why your fix resolves the finding>"
      ```
 
-     Agent-verify **any** requirement Predictable could not decide and that you
-     have genuinely reviewed and concluded holds. Two kinds qualify:
-     - a **`potential issue`** — an indeterminate finding. Target the requirement
-       that *carries the finding*: the analysis-derived `ANL-####` row (a machine
-       obligation, e.g. *"… requires that `opaque_…` is not null"*), matched on the
-       finding's function + line — **not** a readable prose twin that merely
-       mentions the same function.
-     - an **informal / `unchecked`** requirement Predictable could not formalize at
-       all (prose with no machine obligation). This is the purest "Predictable
-       can't check this" case, so a reviewed one is a valid target too.
+     Agent-verify **every** requirement for the function you changed that
+     Predictable could not decide and that your fix demonstrably makes hold — not
+     just one of them. For a single finding that is usually BOTH rows:
+     - the **`ANL-####`** analysis row that *carries the finding* (the machine
+       obligation, e.g. *"… requires that `opaque_…` is not null"*) — **mandatory**,
+       never skip it in favour of its twin; and
+     - any **`unchecked` / informal** prose requirement for the SAME function that
+       states the same concern (e.g. *"… can fail with 'list index out of bounds'"*).
+       Predictable can't decide these either, so a reviewed one is a valid target —
+       verify it too, so the function reads coherently instead of showing one row
+       agent-reviewed and its twin still unchecked.
 
-     When a finding has **both** an `ANL-####` row and a readable prose twin,
-     verify the `ANL-####` row — it carries the verdict. Do **not** agent-verify a
-     requirement that is merely unimplemented/pending (the code doesn't do it yet),
-     a refuted (`violated`) one (fix the code instead), or anything you have not
-     actually reviewed. Get the `<spec-id>`/`<req-id>` from the specs viewer (it
+     Match on the finding's function (`subject`) from the specs viewer / analysis
+     results. Do **not** agent-verify a requirement about a DIFFERENT concern you
+     did not address, one that is merely unimplemented/pending (the code doesn't do
+     it yet), a refuted (`violated`) one (fix the code instead), or anything you have
+     not actually reviewed. Get the `<spec-id>`/`<req-id>` from the specs viewer (it
      shows each status) or `.analysis-findings/`. The command writes your rationale
      to an audit trail and sets the status.
   3. **Disclose it plainly, never as a real verification.** Tell the user:
