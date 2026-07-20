@@ -299,8 +299,16 @@ After every fix, re-check and act on each requirement's **real status**:
      predictable specs requirements agent-verify <spec-id> <req-id> --rationale "<why your fix resolves the finding>"
      ```
 
-     Get `<spec-id>`/`<req-id>` from `predictable specs details` or the specs
-     viewer. The command writes your rationale to an audit trail and sets the status.
+     Target the requirement that **carries the finding** — the one whose status is
+     the `potential issue`. That is the analysis-derived requirement (its id looks
+     like `ANL-####` and its text is a machine obligation, e.g. *"… requires that
+     `opaque_…` is not null"*), **not** a readable prose requirement that happens to
+     mention the same function. Match on the finding's function + line from the
+     analysis results / the specs viewer, never on wording alone, and **never
+     agent-verify an `unchecked` requirement** — only a `potential issue`. Get the
+     `<spec-id>`/`<req-id>` from the specs viewer (it shows each status) or
+     `.analysis-findings/`. The command writes your rationale to an audit trail and
+     sets the status.
   3. **Disclose it plainly, never as a real verification.** Tell the user:
      *"Predictable couldn't decide this one mechanically, so I reviewed my own fix
      and marked it **agent-reviewed** — a softer guarantee than its formal
