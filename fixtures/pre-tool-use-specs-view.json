@@ -5,6 +5,6 @@
   "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
   "tool_input": {
-    "command": "rm .predictable-code/inference/report.html"
+    "command": "predictable specs view 2>/dev/null || true"
   }
 }

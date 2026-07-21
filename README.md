@@ -55,9 +55,11 @@ Everything is advisory except the **pre-push/commit gate**, and even that blocks
 only on a genuine `specViolation`.
 
 The `PreToolUse` hook also **auto-approves the plugin's own commands** — running
-`predictable sync` and opening the generated report — so the agent runs them
-without a permission prompt (`git push`/`git commit` still go through the gate, and
-every other command falls through to the host's normal permission flow).
+`predictable sync`, opening the specs viewer (`predictable specs view`), and
+recording an agent-reviewed fix (`predictable specs requirements agent-verify`) —
+so the agent runs them without a permission prompt (`git push`/`git commit` still
+go through the gate, and every other command falls through to the host's normal
+permission flow).
 
 ## Worktrees & surfaces
 
