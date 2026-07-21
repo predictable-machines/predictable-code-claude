@@ -63,18 +63,28 @@ predictable sync --json --claude 2>&1 1>/tmp/pc-sync-envelope.json \
   | jq --unbuffered -jR '
       fromjson? // empty
       | select(.event == "phase")
-      | ({ translation: { start: "🔄 Reading your code…\n" },
-           analysis:    { start: "🔎 Analyzing your code for issues…\n",
-                          done:  "✓ Analyzed \(.functions // "?") function(s) — \(.findings // 0) potential issue(s)\n",
-                          error: "⚠️ Analysis hit a snag — continuing…\n" },
-           inference:   { start: "🧪 Working out the specification…\n",
-                          done:  "✓ Specification inferred\n" } }[.phase][.state]) // empty'
+      | if .phase == "requirements"
+        then (if (.checked // 0) > 0
+              then "✓ \(.verified) of \(.checked) requirement(s) verified"
+                   + (if (.violated // 0) > 0 then " · \(.violated) refuted" else "" end) + "\n"
+              else empty end)
+        else ({ translation: { start: "🔄 Reading your code…\n" },
+                analysis:    { start: "🔎 Analyzing your code for issues…\n",
+                               done:  "✓ Analyzed \(.functions // "?") function(s) — \(.findings // 0) potential issue(s)\n",
+                               error: "⚠️ Analysis hit a snag — continuing…\n" },
+                inference:   { start: "🧪 Working out the specification…\n",
+                               done:  "✓ Specification inferred\n" } }[.phase][.state]) // empty
+        end'
 ```
 
 How it works: Predictable emits one progress event per phase (as JSON lines on
 stderr); the `jq` filter turns each into a friendly line, so the background task's
 own output IS the live progress the user sees — no internals leak, and you never
-narrate it yourself. `--claude` auto-initializes the project if needed. The
+narrate it yourself. The `requirements` phase carries the **"N of M requirements
+verified"** milestone — the PROJECT total (verified of total checkable, plus the
+refuted count), not this run's delta, so it's meaningful on every check (even an
+incremental re-sync that re-checks nothing). A milestone, not a live counter.
+`--claude` auto-initializes the project if needed. The
 **verdict + findings envelope** (stdout) is written to `/tmp/pc-sync-envelope.json`,
 kept separate from the progress. If `jq` isn't installed the progress just won't
 render — the envelope file is still written; read it anyway. Then:
