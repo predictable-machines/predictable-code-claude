@@ -81,8 +81,9 @@ How it works: Predictable emits one progress event per phase (as JSON lines on
 stderr); the `jq` filter turns each into a friendly line, so the background task's
 own output IS the live progress the user sees — no internals leak, and you never
 narrate it yourself. The `requirements` phase carries the **"N of M requirements
-verified"** milestone (from the mechanical check; a milestone, not a live counter);
-it's shown only when something was actually checked (a no-op re-sync stays quiet).
+verified"** milestone — the PROJECT total (verified of total checkable, plus the
+refuted count), not this run's delta, so it's meaningful on every check (even an
+incremental re-sync that re-checks nothing). A milestone, not a live counter.
 `--claude` auto-initializes the project if needed. The
 **verdict + findings envelope** (stdout) is written to `/tmp/pc-sync-envelope.json`,
 kept separate from the progress. If `jq` isn't installed the progress just won't
