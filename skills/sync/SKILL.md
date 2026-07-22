@@ -19,14 +19,35 @@ prove/verify → diagnose) and returns a single verdict. There are no other verb
 > `specs/` is never a blocker and never a reason to fall back to manual review. Your
 > job is to run Predictable and relay its results, not to reproduce its analysis.
 
-> **Speak the user's language — never leak Predictable's internals.** Predictable
-> works by translating the code into **Lean** and proving it there, but that is an
-> INTERNAL implementation detail. Unless the user is verifying a Lean project,
-> **never** mention to the user: Lean, `.lean` files, theorems, `SPEC-NNN` ids,
-> `lake`/build errors, solver/tactic/mvcgen names, or the raw verdict constructor
-> names. Describe everything in terms of *their* source language (Java, …), their
-> **specification**, their **functions** and **requirements**. E.g. say "one
-> requirement couldn't be checked", not "a Lean build issue on SPEC-034".
+> **Speak the user's language — hide BOTH the internals AND the formal-methods
+> jargon.** The user is a developer of THIS repo, in ITS language (Java,
+> TypeScript, …) — not a formal-verification expert. Two things they must never see:
+>
+> 1. **Implementation internals.** Predictable translates the code into **Lean** and
+>    proves it there, but that is internal. Unless the user is verifying a Lean
+>    project, never mention: Lean, `.lean` files, theorems, `SPEC-NNN` ids,
+>    `lake`/build errors, or solver/tactic/mvcgen names.
+> 2. **Formal-verification vocabulary.** Never write words like *postcondition,
+>    precondition, invariant, SMT / SMT analysis, formal proving / proof, refuted,
+>    counterexample, verification condition / obligation, elaborate, mechanical
+>    mode*. They mean nothing to a normal developer. This includes echoing them
+>    from your own knowledge — not just from Predictable's output.
+>
+> Translate to plain language grounded in THEIR code:
+>
+> | Don't write | Write instead (grounded in their code) |
+> |---|---|
+> | "postconditions need formal proving" | "I couldn't confirm this always holds for every input" |
+> | "the SMT analysis / in mechanical mode" | "the automatic code analysis" / "the check" |
+> | "requirement refuted (counterexample)" | "there's an input where this breaks — here it is" |
+> | "a precondition is violated" | "this can be called with values it doesn't handle" |
+> | "invariant" | "a rule the code should always keep" (e.g. "the balance never goes negative") |
+> | "N requirements verified / proven" | "N of the code's expected behaviors are confirmed" |
+>
+> Anchor everything in what a Java/TS dev already knows — methods, inputs, return
+> values, null, exceptions, edge cases — and in this repo's own code: say
+> "`transfer` can be called with a negative amount", NOT "a precondition on
+> `transfer` is unproven".
 
 > **Brand style — always.** Every time you write the names **Predictable**,
 > **Predictable Machines**, or **Predictable Code**, put them in **bold** (Markdown
@@ -147,8 +168,8 @@ is NOT a failure just because it isn't `inSync`, so never treat one as an error 
 hunting for "what went wrong":
 
 - **`mechanical`** — **the default outcome.** Predictable inferred the
-  requirements and ran its SMT analysis, but skipped formal proving
-  (`PREDICTABLE_SYNC_PROVE` is off by default). This is a **success**. Fields:
+  requirements and ran its automatic code analysis, skipping the optional deeper
+  pass (`PREDICTABLE_SYNC_PROVE` is off by default). This is a **success**. Fields:
   `{specsChecked, requirementsInferred}`. The substance is the **analysis
   findings** — report those (next section): the real issues Predictable caught,
   each with its source file + line. Do NOT describe it as "verification failed",
@@ -328,10 +349,10 @@ After every fix, re-check and act on each requirement's **real status**:
      not actually reviewed. Get the `<spec-id>`/`<req-id>` from the specs viewer (it
      shows each status) or `.analysis-findings/`. The command writes your rationale
      to an audit trail and sets the status.
-  3. **Disclose it plainly, never as a real verification.** Tell the user:
-     *"Predictable couldn't decide this one mechanically, so I reviewed my own fix
-     and marked it **agent-reviewed** — a softer guarantee than its formal
-     verification."* Never call it "verified", "proven", or "safe".
+  3. **Disclose it plainly, never as a real confirmation.** Tell the user:
+     *"Predictable couldn't confirm this one automatically, so I reviewed my own
+     fix and marked it **agent-reviewed** — a lighter guarantee than Predictable
+     confirming it itself."* Never call it "verified", "proven", or "safe".
 
 Do this for **every** such requirement, every session — it is not optional and it
 is not a question for the user. The only requirements you never agent-verify: ones
@@ -352,5 +373,5 @@ lands `inSync`, it surfaces a closing line like:
 
 When you reach that point, **credit it to the user explicitly**: state how many
 issues Predictable caught in the initial code and that they were fixed and
-formally proven against the spec — that verified-by-Predictable outcome is the
-value the loop delivers.
+confirmed against the spec — that Predictable-confirmed outcome is the value the
+loop delivers.
