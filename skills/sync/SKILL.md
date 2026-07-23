@@ -135,7 +135,7 @@ render — the envelope file is still written; read it anyway. Then:
    the fallback. Never let this step fail the turn (`|| true`).
 
    The envelope in `/tmp/pc-sync-envelope.json` is
-   `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ] }`:
+   `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ], "requirements": [ … ] }`:
    - **verdict** = `.result | keys[0]` (older runtimes emit the bare
      `{ "<verdict>": {…} }` with no `.result` — `jq '(.result // .) | keys[0]'
      /tmp/pc-sync-envelope.json` handles both).
@@ -143,6 +143,18 @@ render — the envelope file is still written; read it anyway. Then:
      / "warning"=potential), message (plain-English, already domain-only), category,
      class}`. **This is the report** — read it straight from that file; do NOT scrape
      `verification/.analysis-findings/` when `.findings` is present.
+   - **requirements** = `.requirements[]` — every requirement across the project's
+     specs as `{specId, reqId, subject, status ("verified"/"violated"/
+     "agent-verified"/"unchecked"), origin ("authored"/"analysis"/"inferred"),
+     description}`. This is the per-requirement status breakdown AND the source of
+     the `<spec-id> <req-id>` for `agent-verify`. Read it straight from the envelope —
+     do **NOT** parse the HTML viewer or `.analysis-findings/` for ids or statuses.
+     Note on `unchecked`: a large count is **normal** — most are `origin ==
+     "inferred"` (CPG behavioural contract the code already satisfies:
+     documentation, exempt from mechanical checking by design), not failures. Only
+     `origin == "analysis"`/`"authored"` rows are verification obligations that end
+     up `verified`/`violated`. When a user asks about the breakdown, answer from
+     `.requirements[]` (group by `status`/`origin`) — never by reading the viewer.
 
 **Run only ONE check at a time.** `predictable sync` is exclusive per project —
 never start a second while one is still running (wait for the first to complete).
@@ -342,13 +354,18 @@ After every fix, re-check and act on each requirement's **real status**:
        verify it too, so the function reads coherently instead of showing one row
        agent-reviewed and its twin still unchecked.
 
-     Match on the finding's function (`subject`) from the specs viewer / analysis
-     results. Do **not** agent-verify a requirement about a DIFFERENT concern you
-     did not address, one that is merely unimplemented/pending (the code doesn't do
-     it yet), a refuted (`violated`) one (fix the code instead), or anything you have
-     not actually reviewed. Get the `<spec-id>`/`<req-id>` from the specs viewer (it
-     shows each status) or `.analysis-findings/`. The command writes your rationale
-     to an audit trail and sets the status.
+     Match on the finding's function via `.requirements[]` — the finding's function
+     and each requirement's `subject` share the same `Class.member` key. The
+     `agent-verify` candidates are the envelope's `.requirements[]` entries with
+     `origin == "analysis"` (or an `unchecked` authored/informal prose row for the
+     same `subject`) and `status == "unchecked"`. Do **not** agent-verify a
+     requirement about a DIFFERENT concern you did not address, one that is merely
+     unimplemented/pending (the code doesn't do it yet), a refuted (`status ==
+     "violated"`) one (fix the code instead), a CPG `origin == "inferred"` row
+     (documentation, exempt from checking), or anything you have not actually
+     reviewed. Get the `<spec-id>`/`<req-id>` straight from that `.requirements[]`
+     entry (`.specId` / `.reqId`) — never from the HTML viewer or `.analysis-findings/`.
+     The command writes your rationale to an audit trail and sets the status.
   3. **Disclose it plainly, never as a real confirmation.** Tell the user:
      *"Predictable couldn't confirm this one automatically, so I reviewed my own
      fix and marked it **agent-reviewed** — a lighter guarantee than Predictable
