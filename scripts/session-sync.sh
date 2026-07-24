@@ -42,6 +42,60 @@ if pc_sync_running; then
   exit 0
 fi
 
+# Deterministic visibility: wire the plugin statusline into the project's
+# .claude/settings.local.json when NO statusLine is configured in any settings
+# file we can see (user / project / local) — never clobber an existing one.
+# statusLine is a settings-only surface (plugins cannot ship it), and
+# refreshInterval keeps it re-running while the session idles, so the detached
+# sync below stays visible — running and finished — without any model
+# cooperation. Hot-reload applies it from the first interaction.
+ensure_statusline() {
+  pc_have_jq || return 0
+  for settings_file in "$HOME/.claude/settings.json" "$project/.claude/settings.json" "$project/.claude/settings.local.json"; do
+    if [ -f "$settings_file" ] && jq -e '.statusLine' "$settings_file" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  statusline_script="${CLAUDE_PLUGIN_ROOT:-$self_dir/..}/scripts/statusline.sh"
+  [ -x "$statusline_script" ] || return 0
+  mkdir -p "$project/.claude" 2>/dev/null || return 0
+  local_settings="$project/.claude/settings.local.json"
+  existing_settings="{}"
+  if [ -f "$local_settings" ]; then
+    existing_settings="$(cat "$local_settings" 2>/dev/null || printf '{}')"
+  fi
+  tmp_settings="$local_settings.tmp.$$"
+  if printf '%s' "$existing_settings" | jq --arg cmd "$statusline_script" \
+    '. + {statusLine: {type: "command", command: $cmd, refreshInterval: 2, padding: 0}}' \
+    >"$tmp_settings" 2>/dev/null; then
+    mv "$tmp_settings" "$local_settings" 2>/dev/null || rm -f "$tmp_settings" 2>/dev/null || true
+    pc_log SessionStart session-sync statusline-wired
+  else
+    rm -f "$tmp_settings" 2>/dev/null || true
+  fi
+}
+ensure_statusline
+
+# Native OS notification when the detached sync finishes — the completion-side
+# counterpart of the statusline (Claude cannot be woken by a hook process, but
+# the OS can tell the user directly). Best-effort and silent on failure;
+# skipped in FOREGROUND mode so L1 test runs never pop notifications.
+notify_sync_done() { # verdict-file
+  [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ] && return 0
+  finished_verdict="$(pc_verdict_name "$1")"
+  message="Sync finished — $(pc_verdict_summary "$finished_verdict")"
+  case "$(uname -s)" in
+    Darwin)
+      osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
+      ;;
+    *)
+      if command -v notify-send >/dev/null 2>&1; then
+        notify-send "Predictable Code" "$message" >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
+}
+
 # Fire the first sync DETACHED; SessionStart returns now, the verdict lands next
 # turn. `--claude` auto-inits the project if needed (product-side). PREDICTABLE_SYNC_
 # FOREGROUND=1 runs it synchronously (L1 tests / debugging).
@@ -51,6 +105,7 @@ run_first_sync() {
   if ( cd "$project" 2>/dev/null && "$bin" sync --json --claude ) >"$tmp" 2>/dev/null; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     pc_record_sync SessionStart "$verdict_file"
+    notify_sync_done "$verdict_file"
   else
     rm -f "$tmp" 2>/dev/null || true
   fi
