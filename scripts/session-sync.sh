@@ -80,6 +80,55 @@ ensure_statusline
 # counterpart of the statusline (Claude cannot be woken by a hook process, but
 # the OS can tell the user directly). Best-effort and silent on failure;
 # skipped in FOREGROUND mode so L1 test runs never pop notifications.
+# Build (once, cached) a tiny AppleScript applet whose bundle carries the brand
+# Λ as its app icon. macOS notifications always show the POSTING app's icon and
+# name — `display notification` has no icon parameter — so the only
+# zero-install way to brand them is to BE the app: osacompile + sips + iconutil
+# all ship with macOS. Rebuilt when the logo changes (mtime stamp); any build
+# failure just means the caller falls back to plain osascript. First
+# notification from the applet triggers the standard one-time permission
+# prompt for "Predictable Code".
+ensure_notifier_app() { # logo-png -> prints applet executable path on success
+  notifier_dir="$(pc_data_dir)/notifier"
+  applet_bin="$notifier_dir/Predictable Code.app/Contents/MacOS/applet"
+  logo_png="$1"
+  [ -f "$logo_png" ] || return 1
+  command -v osacompile >/dev/null 2>&1 || return 1
+  command -v sips >/dev/null 2>&1 || return 1
+  command -v iconutil >/dev/null 2>&1 || return 1
+  logo_stamp="$(stat -f %m "$logo_png" 2>/dev/null || stat -c %Y "$logo_png" 2>/dev/null || printf '0')"
+  built_stamp="$(cat "$notifier_dir/.logo-stamp" 2>/dev/null || printf '')"
+  if [ -x "$applet_bin" ] && [ "$logo_stamp" = "$built_stamp" ]; then
+    printf '%s' "$applet_bin"
+    return 0
+  fi
+  build_dir="$(mktemp -d 2>/dev/null)" || return 1
+  printf 'display notification (system attribute "PC_NOTIFY_MSG") with title "Predictable Code"\n' \
+    >"$build_dir/notify.applescript"
+  if ! osacompile -o "$build_dir/Predictable Code.app" "$build_dir/notify.applescript" >/dev/null 2>&1; then
+    rm -rf "$build_dir" 2>/dev/null || true
+    return 1
+  fi
+  mkdir -p "$build_dir/icon.iconset" 2>/dev/null || true
+  for icon_size in 16 32 128 256; do
+    sips -z "$icon_size" "$icon_size" "$logo_png" \
+      --out "$build_dir/icon.iconset/icon_${icon_size}x${icon_size}.png" >/dev/null 2>&1 || true
+  done
+  # A failed icns build keeps the stock applet icon — still branded by NAME.
+  if iconutil -c icns -o "$build_dir/applet.icns" "$build_dir/icon.iconset" >/dev/null 2>&1; then
+    cp "$build_dir/applet.icns" "$build_dir/Predictable Code.app/Contents/Resources/applet.icns" 2>/dev/null || true
+  fi
+  rm -rf "$notifier_dir" 2>/dev/null || true
+  mkdir -p "$notifier_dir" 2>/dev/null || true
+  if mv "$build_dir/Predictable Code.app" "$notifier_dir/" 2>/dev/null; then
+    printf '%s' "$logo_stamp" >"$notifier_dir/.logo-stamp" 2>/dev/null || true
+    rm -rf "$build_dir" 2>/dev/null || true
+    [ -x "$applet_bin" ] && printf '%s' "$applet_bin" && return 0
+  fi
+  rm -rf "$build_dir" 2>/dev/null || true
+  return 1
+}
+
 notify_sync_done() { # verdict-file
   [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ] && return 0
   finished_verdict="$(pc_verdict_name "$1")"
@@ -87,13 +136,12 @@ notify_sync_done() { # verdict-file
   logo="${CLAUDE_PLUGIN_ROOT:-$self_dir/..}/assets/logo.png"
   case "$(uname -s)" in
     Darwin)
-      # `display notification` cannot carry a custom icon — macOS always shows
-      # the POSTING app's icon (Script Editor for osascript). terminal-notifier,
-      # when installed, rides the brand Λ as the notification's content image;
-      # osascript stays the zero-dependency fallback.
-      if command -v terminal-notifier >/dev/null 2>&1 && [ -f "$logo" ]; then
-        terminal-notifier -title "Predictable Code" -message "$message" \
-          -appIcon "$logo" -contentImage "$logo" >/dev/null 2>&1 || true
+      # Zero-install branded notification via the self-built applet (own icon +
+      # own name); plain osascript — Script Editor identity, no logo — only when
+      # the applet cannot be built or run.
+      applet="$(ensure_notifier_app "$logo" || printf '')"
+      if [ -n "$applet" ] && PC_NOTIFY_MSG="$message" "$applet" >/dev/null 2>&1; then
+        :
       else
         osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
       fi
