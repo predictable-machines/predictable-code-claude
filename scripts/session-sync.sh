@@ -84,13 +84,27 @@ notify_sync_done() { # verdict-file
   [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ] && return 0
   finished_verdict="$(pc_verdict_name "$1")"
   message="Sync finished — $(pc_verdict_summary "$finished_verdict")"
+  logo="${CLAUDE_PLUGIN_ROOT:-$self_dir/..}/assets/logo.png"
   case "$(uname -s)" in
     Darwin)
-      osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
+      # `display notification` cannot carry a custom icon — macOS always shows
+      # the POSTING app's icon (Script Editor for osascript). terminal-notifier,
+      # when installed, rides the brand Λ as the notification's content image;
+      # osascript stays the zero-dependency fallback.
+      if command -v terminal-notifier >/dev/null 2>&1 && [ -f "$logo" ]; then
+        terminal-notifier -title "Predictable Code" -message "$message" \
+          -appIcon "$logo" -contentImage "$logo" >/dev/null 2>&1 || true
+      else
+        osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
+      fi
       ;;
     *)
       if command -v notify-send >/dev/null 2>&1; then
-        notify-send "Predictable Code" "$message" >/dev/null 2>&1 || true
+        if [ -f "$logo" ]; then
+          notify-send -i "$logo" "Predictable Code" "$message" >/dev/null 2>&1 || true
+        else
+          notify-send "Predictable Code" "$message" >/dev/null 2>&1 || true
+        fi
       fi
       ;;
   esac
