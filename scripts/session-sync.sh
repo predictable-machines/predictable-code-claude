@@ -103,8 +103,21 @@ ensure_notifier_app() { # logo-png -> prints applet executable path on success
     return 0
   fi
   build_dir="$(mktemp -d 2>/dev/null)" || return 1
-  printf 'display notification (system attribute "PC_NOTIFY_MSG") with title "Predictable Code"\n' \
-    >"$build_dir/notify.applescript"
+  # The applet reads its message from `message.txt` NEXT TO its own bundle, not
+  # from the environment: it is launched via `open` (LaunchServices), which is
+  # what registers the app and triggers the notification-permission prompt —
+  # a directly-exec'd applet can stay unregistered and macOS then drops its
+  # notifications silently, without ever prompting. `open` does not forward
+  # the caller's environment, hence the sibling file.
+  cat >"$build_dir/notify.applescript" <<'APPLESCRIPT'
+try
+  set msgFile to (POSIX path of (path to me)) & "/../message.txt"
+  set msg to read (POSIX file msgFile) as «class utf8»
+on error
+  set msg to "Sync finished."
+end try
+display notification msg with title "Predictable Code"
+APPLESCRIPT
   if ! osacompile -o "$build_dir/Predictable Code.app" "$build_dir/notify.applescript" >/dev/null 2>&1; then
     rm -rf "$build_dir" 2>/dev/null || true
     return 1
@@ -129,6 +142,18 @@ ensure_notifier_app() { # logo-png -> prints applet executable path on success
   return 1
 }
 
+# Post one branded notification through the applet: write the sibling message
+# file, launch the BUNDLE via `open` (-g: no focus steal, -j: hidden). Returns
+# non-zero when the applet is unavailable so the caller can fall back.
+post_branded_notification() { # logo-png message
+  applet_exec="$(ensure_notifier_app "$1" || printf '')"
+  [ -n "$applet_exec" ] || return 1
+  applet_bundle="${applet_exec%/Contents/MacOS/applet}"
+  printf '%s' "$2" >"$(dirname "$applet_bundle")/message.txt" 2>/dev/null || return 1
+  open -gj "$applet_bundle" >/dev/null 2>&1 || return 1
+  return 0
+}
+
 notify_sync_done() { # verdict-file
   [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ] && return 0
   finished_verdict="$(pc_verdict_name "$1")"
@@ -138,9 +163,8 @@ notify_sync_done() { # verdict-file
     Darwin)
       # Zero-install branded notification via the self-built applet (own icon +
       # own name); plain osascript — Script Editor identity, no logo — only when
-      # the applet cannot be built or run.
-      applet="$(ensure_notifier_app "$logo" || printf '')"
-      if [ -n "$applet" ] && PC_NOTIFY_MSG="$message" "$applet" >/dev/null 2>&1; then
+      # the applet cannot be built or launched.
+      if post_branded_notification "$logo" "$message"; then
         :
       else
         osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
