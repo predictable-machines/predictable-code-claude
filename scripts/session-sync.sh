@@ -67,5 +67,5 @@ pc_log SessionStart session-sync started
 # check just started (the sync is detached and silent, and the verdict file
 # only lands when it finishes). systemMessage is user-facing UI, not model
 # context — status-context carries the model-side "a check is running" line.
-pc_emit_system_message "Predictable Code: checking this project's specs in the background. The verdict lands on your next turn; asking to check specs meanwhile reuses this run (it never starts a second one)."
+pc_emit_system_message "Predictable Code is syncing the project in the background."
 exit 0
