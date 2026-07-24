@@ -42,6 +42,25 @@ else
   body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: verification/.analysis-results.json. Re-run predictable sync after edits."
 fi
 
+# Live-check beacon: the product's project sync lock (`.predictable-code/.sync.lock`)
+# names the pid of the sync running RIGHT NOW — the only signal that exists the
+# moment a background check starts (the verdict file lands only at the end). With
+# it the agent can tell the user a check is in flight instead of reporting stale
+# state; a dead pid means a stale lock the product will clear itself, so only a
+# live one is surfaced.
+lock_file="$(pc_project_dir)/.predictable-code/.sync.lock"
+if [ -f "$lock_file" ] && pc_have_jq; then
+  lock_pid="$(jq -r '.pid // 0' "$lock_file" 2>/dev/null || printf '0')"
+  case "$lock_pid" in
+    ''|*[!0-9]*) lock_pid=0 ;;
+  esac
+  if [ "$lock_pid" -gt 0 ] && kill -0 "$lock_pid" 2>/dev/null; then
+    body="A Predictable Code spec check is running right now (pid $lock_pid) — mention it to the user when they ask about spec/verification state. Its verdict lands when it finishes; running \`predictable sync --json\` meanwhile ATTACHES to the running check and reuses its result (project sync lock), so checking on demand is safe and never duplicates work.
+
+$body"
+  fi
+fi
+
 # The brand + AskUserQuestion rules ride on every turn's context so they apply
 # session-wide, not only inside the sync skill.
 pc_emit_context "$event" "$(pc_brand_style_rule)
