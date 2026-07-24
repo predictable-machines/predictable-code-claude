@@ -44,10 +44,13 @@ fi
 
 # Live-check beacon: the product's project sync lock (`.predictable-code/.sync.lock`)
 # names the pid of the sync running RIGHT NOW — the only signal that exists the
-# moment a background check starts (the verdict file lands only at the end). With
-# it the agent can tell the user a check is in flight instead of reporting stale
-# state; a dead pid means a stale lock the product will clear itself, so only a
-# live one is surfaced.
+# moment a background check starts (the verdict file lands only at the end). The
+# injected line tells the agent to ATTACH a background `sync --json` shell to it:
+# the lock makes that attach (one pipeline, shared result), the background shell
+# is user-visible, and its completion notification is what lets the agent REACT
+# when the detached hook sync finishes — a hook cannot wake the agent, but the
+# agent's own background task can. A dead pid means a stale lock the product
+# clears itself, so only a live one is surfaced.
 lock_file="$(pc_project_dir)/.predictable-code/.sync.lock"
 if [ -f "$lock_file" ] && pc_have_jq; then
   lock_pid="$(jq -r '.pid // 0' "$lock_file" 2>/dev/null || printf '0')"
@@ -55,7 +58,7 @@ if [ -f "$lock_file" ] && pc_have_jq; then
     ''|*[!0-9]*) lock_pid=0 ;;
   esac
   if [ "$lock_pid" -gt 0 ] && kill -0 "$lock_pid" 2>/dev/null; then
-    body="A Predictable Code spec check is running right now (pid $lock_pid) — mention it to the user when they ask about spec/verification state. Its verdict lands when it finishes; running \`predictable sync --json\` meanwhile ATTACHES to the running check and reuses its result (project sync lock), so checking on demand is safe and never duplicates work.
+    body="A Predictable Code spec check is running right now (pid $lock_pid). Unless you already have one running this session, start \`predictable sync --json\` NOW as a BACKGROUND shell task (never block your turn on it): the project sync lock makes it attach to the running check and finish together with it, its shell is visible to the user, and its completion notification is your cue to briefly tell the user the verdict (verified/violated counts and findings). Keep working on the user's request meanwhile.
 
 $body"
   fi
