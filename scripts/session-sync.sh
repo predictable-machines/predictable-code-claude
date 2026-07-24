@@ -97,6 +97,9 @@ ensure_notifier_app() { # logo-png -> prints applet executable path on success
   command -v sips >/dev/null 2>&1 || return 1
   command -v iconutil >/dev/null 2>&1 || return 1
   logo_stamp="$(stat -f %m "$logo_png" 2>/dev/null || stat -c %Y "$logo_png" 2>/dev/null || printf '0')"
+  # Script-version suffix: a cached applet must rebuild when the APPLESCRIPT
+  # body changes, not only when the logo does.
+  logo_stamp="$logo_stamp-v2"
   built_stamp="$(cat "$notifier_dir/.logo-stamp" 2>/dev/null || printf '')"
   if [ -x "$applet_bin" ] && [ "$logo_stamp" = "$built_stamp" ]; then
     printf '%s' "$applet_bin"
@@ -117,6 +120,10 @@ on error
   set msg to "Sync finished."
 end try
 display notification msg with title "Predictable Code"
+-- The notification (and the first-run authorization request) is asynchronous;
+-- an applet that exits immediately gets both dropped silently — the app then
+-- never even appears in System Settings → Notifications.
+delay 2
 APPLESCRIPT
   if ! osacompile -o "$build_dir/Predictable Code.app" "$build_dir/notify.applescript" >/dev/null 2>&1; then
     rm -rf "$build_dir" 2>/dev/null || true
