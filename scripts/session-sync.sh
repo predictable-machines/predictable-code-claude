@@ -80,110 +80,17 @@ ensure_statusline
 # counterpart of the statusline (Claude cannot be woken by a hook process, but
 # the OS can tell the user directly). Best-effort and silent on failure;
 # skipped in FOREGROUND mode so L1 test runs never pop notifications.
-# Build (once, cached) a tiny AppleScript applet whose bundle carries the brand
-# Λ as its app icon. macOS notifications always show the POSTING app's icon and
-# name — `display notification` has no icon parameter — so the only
-# zero-install way to brand them is to BE the app: osacompile + sips + iconutil
-# all ship with macOS. Rebuilt when the logo changes (mtime stamp); any build
-# failure just means the caller falls back to plain osascript. First
-# notification from the applet triggers the standard one-time permission
-# prompt for "Predictable Code".
-ensure_notifier_app() { # logo-png -> prints applet executable path on success
-  notifier_dir="$(pc_data_dir)/notifier"
-  applet_bin="$notifier_dir/Predictable Code.app/Contents/MacOS/applet"
-  logo_png="$1"
-  [ -f "$logo_png" ] || return 1
-  command -v osacompile >/dev/null 2>&1 || return 1
-  command -v sips >/dev/null 2>&1 || return 1
-  command -v iconutil >/dev/null 2>&1 || return 1
-  logo_stamp="$(stat -f %m "$logo_png" 2>/dev/null || stat -c %Y "$logo_png" 2>/dev/null || printf '0')"
-  # Script-version suffix: a cached applet must rebuild when the APPLESCRIPT
-  # body changes, not only when the logo does.
-  logo_stamp="$logo_stamp-v2"
-  built_stamp="$(cat "$notifier_dir/.logo-stamp" 2>/dev/null || printf '')"
-  if [ -x "$applet_bin" ] && [ "$logo_stamp" = "$built_stamp" ]; then
-    printf '%s' "$applet_bin"
-    return 0
-  fi
-  build_dir="$(mktemp -d 2>/dev/null)" || return 1
-  # The applet reads its message from `message.txt` NEXT TO its own bundle, not
-  # from the environment: it is launched via `open` (LaunchServices), which is
-  # what registers the app and triggers the notification-permission prompt —
-  # a directly-exec'd applet can stay unregistered and macOS then drops its
-  # notifications silently, without ever prompting. `open` does not forward
-  # the caller's environment, hence the sibling file.
-  cat >"$build_dir/notify.applescript" <<'APPLESCRIPT'
-try
-  set msgFile to (POSIX path of (path to me)) & "/../message.txt"
-  set msg to read (POSIX file msgFile) as «class utf8»
-on error
-  set msg to "Sync finished."
-end try
-display notification msg with title "Predictable Code"
--- The notification (and the first-run authorization request) is asynchronous;
--- an applet that exits immediately gets both dropped silently — the app then
--- never even appears in System Settings → Notifications.
-delay 2
-APPLESCRIPT
-  if ! osacompile -o "$build_dir/Predictable Code.app" "$build_dir/notify.applescript" >/dev/null 2>&1; then
-    rm -rf "$build_dir" 2>/dev/null || true
-    return 1
-  fi
-  mkdir -p "$build_dir/icon.iconset" 2>/dev/null || true
-  for icon_size in 16 32 128 256; do
-    sips -z "$icon_size" "$icon_size" "$logo_png" \
-      --out "$build_dir/icon.iconset/icon_${icon_size}x${icon_size}.png" >/dev/null 2>&1 || true
-  done
-  # A failed icns build keeps the stock applet icon — still branded by NAME.
-  if iconutil -c icns -o "$build_dir/applet.icns" "$build_dir/icon.iconset" >/dev/null 2>&1; then
-    cp "$build_dir/applet.icns" "$build_dir/Predictable Code.app/Contents/Resources/applet.icns" 2>/dev/null || true
-  fi
-  rm -rf "$notifier_dir" 2>/dev/null || true
-  mkdir -p "$notifier_dir" 2>/dev/null || true
-  if mv "$build_dir/Predictable Code.app" "$notifier_dir/" 2>/dev/null; then
-    printf '%s' "$logo_stamp" >"$notifier_dir/.logo-stamp" 2>/dev/null || true
-    rm -rf "$build_dir" 2>/dev/null || true
-    [ -x "$applet_bin" ] && printf '%s' "$applet_bin" && return 0
-  fi
-  rm -rf "$build_dir" 2>/dev/null || true
-  return 1
-}
-
-# Post one branded notification through the applet: write the sibling message
-# file, launch the BUNDLE via `open` (-g: no focus steal, -j: hidden). Returns
-# non-zero when the applet is unavailable so the caller can fall back.
-post_branded_notification() { # logo-png message
-  applet_exec="$(ensure_notifier_app "$1" || printf '')"
-  [ -n "$applet_exec" ] || return 1
-  applet_bundle="${applet_exec%/Contents/MacOS/applet}"
-  printf '%s' "$2" >"$(dirname "$applet_bundle")/message.txt" 2>/dev/null || return 1
-  open -gj "$applet_bundle" >/dev/null 2>&1 || return 1
-  return 0
-}
-
 notify_sync_done() { # verdict-file
   [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ] && return 0
   finished_verdict="$(pc_verdict_name "$1")"
   message="Sync finished — $(pc_verdict_summary "$finished_verdict")"
-  logo="${CLAUDE_PLUGIN_ROOT:-$self_dir/..}/assets/logo.png"
   case "$(uname -s)" in
     Darwin)
-      # Zero-install branded notification via the self-built applet (own icon +
-      # own name); plain osascript — Script Editor identity, no logo — only when
-      # the applet cannot be built or launched.
-      if post_branded_notification "$logo" "$message"; then
-        :
-      else
-        osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
-      fi
+      osascript -e "display notification \"$message\" with title \"Predictable Code\"" >/dev/null 2>&1 || true
       ;;
     *)
       if command -v notify-send >/dev/null 2>&1; then
-        if [ -f "$logo" ]; then
-          notify-send -i "$logo" "Predictable Code" "$message" >/dev/null 2>&1 || true
-        else
-          notify-send "Predictable Code" "$message" >/dev/null 2>&1 || true
-        fi
+        notify-send "Predictable Code" "$message" >/dev/null 2>&1 || true
       fi
       ;;
   esac
