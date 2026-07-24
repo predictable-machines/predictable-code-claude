@@ -63,9 +63,23 @@ else
 fi
 
 pc_log SessionStart session-sync started
-# Make the invisible visible: this is the user's ONLY signal that a background
-# check just started (the sync is detached and silent, and the verdict file
-# only lands when it finishes). systemMessage is user-facing UI, not model
-# context — status-context carries the model-side "a check is running" line.
-pc_emit_system_message "Predictable Code is syncing the project in the background."
+# Make the invisible visible. The detached sync above can NEVER appear in the
+# user's shell panel — that panel only shows tasks the agent itself launches —
+# so one combined JSON carries both audiences: a one-line `systemMessage` for
+# the user, and `additionalContext` instructing the agent to start an ATTACH
+# task on its first turn (the product's sync lock joins it to the running
+# check: one pipeline, shared result). The attach task is what gives the user
+# a visible shell AND gives the agent a completion notification to react to.
+# Instructed HERE, not via the lock beacon, because the beacon races the
+# check's duration (a fast check can finish before the first prompt).
+sync_cmd="$bin"
+[ -x "$bin" ] || sync_cmd="predictable"
+if pc_have_jq; then
+  jq -n \
+    --arg message "Predictable Code is syncing the project in the background." \
+    --arg context "A Predictable Code spec check was just started in the background (detached from a hook, so it has no visible shell). On your FIRST turn this session, before other tool calls, start \`$sync_cmd sync --json\` as a BACKGROUND shell task and keep working — never block a turn on it. The project sync lock makes it attach to the running check (one pipeline, shared result; if the check already finished it re-checks incrementally and fast). Its shell is the user's window into the sync, and its completion notification is your cue to briefly report the verdict (verified/violated counts and findings)." \
+    '{systemMessage: $message, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $context}}'
+else
+  pc_emit_system_message "Predictable Code is syncing the project in the background."
+fi
 exit 0
