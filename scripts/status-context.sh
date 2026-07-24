@@ -20,9 +20,21 @@ rm -f "$stdin_json" 2>/dev/null || true
 # A brand-new session resets the per-session "issues found vs fixed" tally so
 # the metric reflects THIS session's work. Resume/compact continue it, so only
 # the `startup` source clears it.
+#
+# The announced-run marker starts at the CURRENT persisted runId so a verdict
+# left over from a previous session is never announced as "finished" — only
+# syncs that complete DURING this session get the one-shot closing line below.
+announced_marker="$(pc_data_dir)/announced-sync-run"
+runtime_result="$(pc_project_dir)/.predictable-code/.last-sync-response.json"
 if [ "$event" = "SessionStart" ] && [ "$src" = "startup" ]; then
   pc_reset_session_history
   rm -f "$(pc_last_verdict_file)" 2>/dev/null || true
+  mkdir -p "$(pc_data_dir)" 2>/dev/null || true
+  if pc_have_jq && [ -f "$runtime_result" ]; then
+    jq -r '.runId // "-"' "$runtime_result" 2>/dev/null >"$announced_marker" || true
+  else
+    printf '%s\n' '-' >"$announced_marker" 2>/dev/null || true
+  fi
 fi
 
 verdict_file="$(pc_last_verdict_file)"
@@ -52,21 +64,47 @@ fi
 # agent's own background task can. A dead pid means a stale lock the product
 # clears itself, so only a live one is surfaced.
 lock_file="$(pc_project_dir)/.predictable-code/.sync.lock"
+sync_live=0
 if [ -f "$lock_file" ] && pc_have_jq; then
   lock_pid="$(jq -r '.pid // 0' "$lock_file" 2>/dev/null || printf '0')"
   case "$lock_pid" in
     ''|*[!0-9]*) lock_pid=0 ;;
   esac
   if [ "$lock_pid" -gt 0 ] && kill -0 "$lock_pid" 2>/dev/null; then
+    sync_live=1
     body="A Predictable Code spec check is running right now (pid $lock_pid). Unless you already have one running this session, start \`predictable sync --json\` NOW as a BACKGROUND shell task (never block your turn on it): the project sync lock makes it attach to the running check and finish together with it, its shell is visible to the user, and its completion notification is your cue to briefly tell the user the verdict (verified/violated counts and findings). Keep working on the user's request meanwhile.
 
 $body"
   fi
 fi
 
+# One-shot closing line, the counterpart of session-sync's "syncing in the
+# background" toast: when a sync COMPLETED since the last announcement (fresh
+# runId in the runtime's persisted response, and no LIVE lock), surface a single
+# user-visible systemMessage with the verdict alongside the context injection —
+# a hook cannot speak at the moment the detached sync ends, so the next prompt
+# is the earliest deterministic in-UI slot.
+announce=""
+if pc_have_jq && [ -f "$runtime_result" ] && [ "$sync_live" -eq 0 ]; then
+  current_run="$(jq -r '.runId // "-"' "$runtime_result" 2>/dev/null || printf '%s' '-')"
+  last_announced="$(cat "$announced_marker" 2>/dev/null || printf '')"
+  if [ "$current_run" != "-" ] && [ "$current_run" != "$last_announced" ]; then
+    run_verdict="$(jq -r '.response | keys[0] // "-"' "$runtime_result" 2>/dev/null || printf '%s' '-')"
+    announce="Predictable Code: sync finished — $(pc_verdict_summary "$run_verdict")."
+    mkdir -p "$(pc_data_dir)" 2>/dev/null || true
+    printf '%s\n' "$current_run" >"$announced_marker" 2>/dev/null || true
+  fi
+fi
+
 # The brand + AskUserQuestion rules ride on every turn's context so they apply
 # session-wide, not only inside the sync skill.
-pc_emit_context "$event" "$(pc_brand_style_rule)
+context_text="$(pc_brand_style_rule)
 $(pc_askquestion_rule)
 $body"
+if [ -n "$announce" ] && pc_have_jq; then
+  jq -n --arg e "$event" --arg c "$context_text" --arg m "$announce" \
+    '{systemMessage: $m, hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
+else
+  pc_emit_context "$event" "$context_text"
+fi
 exit 0

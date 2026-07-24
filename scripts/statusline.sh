@@ -49,6 +49,22 @@ if [ -z "$segment" ] && [ -n "$project" ] && [ -f "$result" ]; then
     verificationError) segment="Predictable ✗ verification error" ;;
     *) segment="" ;;
   esac
+  # Age suffix so a ✓ is unambiguous ("finished, N min ago"), never confusable
+  # with a verdict left over from an older run. BSD stat first (macOS), GNU
+  # fallback; no age shown when neither works.
+  if [ -n "$segment" ]; then
+    result_mtime=$(stat -f %m "$result" 2>/dev/null || stat -c %Y "$result" 2>/dev/null || printf '')
+    now_epoch=$(date +%s 2>/dev/null || printf '')
+    if [ -n "$result_mtime" ] && [ -n "$now_epoch" ]; then
+      age=$((now_epoch - result_mtime))
+      if [ "$age" -ge 3600 ]; then
+        age_label="$((age / 3600))h"
+      else
+        if [ "$age" -ge 60 ]; then age_label="$((age / 60))m"; else age_label="${age}s"; fi
+      fi
+      segment="$segment ($age_label ago)"
+    fi
+  fi
 fi
 
 line="$model"
