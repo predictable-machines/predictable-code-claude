@@ -141,20 +141,41 @@ render — the envelope file is still written; read it anyway. Then:
      /tmp/pc-sync-envelope.json` handles both).
    - **findings** = `.findings[]` — each is `{file, line, severity ("error"=affecting
      / "warning"=potential), message (plain-English, already domain-only), category,
-     class}`. **This is the report** — read it straight from that file; do NOT scrape
-     `verification/.analysis-findings/` when `.findings` is present.
+     class, fqn, vc}`. **This is the summary report** — read it straight from that
+     file; do NOT scrape `verification/.analysis-findings/` when `.findings` is
+     present. `fqn` + `vc` are JOIN KEYS into the machine viewer data (below).
    - **requirements** = `.requirements[]` — every requirement across the project's
      specs as `{specId, reqId, subject, status ("verified"/"violated"/
      "agent-verified"/"unchecked"), origin ("authored"/"analysis"/"inferred"),
      description}`. This is the per-requirement status breakdown AND the source of
-     the `<spec-id> <req-id>` for `agent-verify`. Read it straight from the envelope —
-     do **NOT** parse the HTML viewer or `.analysis-findings/` for ids or statuses.
+     the `<spec-id> <req-id>` for `agent-verify`.
      Note on `unchecked`: a large count is **normal** — most are `origin ==
      "inferred"` (CPG behavioural contract the code already satisfies:
      documentation, exempt from mechanical checking by design), not failures. Only
      `origin == "analysis"`/`"authored"` rows are verification obligations that end
      up `verified`/`violated`. When a user asks about the breakdown, answer from
      `.requirements[]` (group by `status`/`origin`) — never by reading the viewer.
+
+   **The COMPLETE model — everything the HTML viewer shows — lives in
+   `<project>/.predictable-code/specs/.data/*.json`** (written by the same
+   generator, same run, so it can never disagree with the viewer). The envelope
+   is a SUMMARY; whenever you need what the viewer knows — the
+   finding↔requirement association, a requirement's DISPLAYED status, per-finding
+   detail, entry points — read these files (start with `index.json`, which
+   describes each):
+   - `req-analysis.json` — per requirement `{specId, reqId, subject, status,
+     scenarioVc, reachClass, unsafeEntryPoints}`. **`status` here is what the
+     user SEES in the viewer** (finding-first): a row can be `verified` in the
+     envelope's `.requirements[]` (its mechanical contract holds) yet `issue`
+     here (a reachable finding is still attached). When the two differ, report
+     BOTH truths: "contract proven, but a reachable path still hits it".
+   - `inferred-analysis.json` — the Analysis-tab FIN rows `{id, fqn, condition,
+     status, reachClass, vc, line, descriptor, unsafeEntryPoints}` + entry
+     points. Join envelope findings via `(fqn, vc)`; join requirements via
+     `req-analysis.json`'s `subject`/`scenarioVc`.
+   - `specs.json` — full spec docs with every row's persisted flags.
+   Never parse the HTML viewer or `.predictable-code/specs/locations/**` — the
+   `.data/` files ARE the machine form of the viewer.
 
 **Run only ONE check at a time.** `predictable sync` is exclusive per project —
 never start a second while one is still running (wait for the first to complete).
@@ -204,10 +225,13 @@ checked". Cite each finding's own `file` + `line` (from `.findings[]`), never `.
 ## Where the findings live
 
 **The findings are in the sync envelope itself** — `.findings[]`
-(`{file, line, severity, message, category, class}`, messages already domain-only)
-in `/tmp/pc-sync-envelope.json`. Read them straight from that file; that IS the
-report. Do **not** scrape `verification/.analysis-findings/` or
-`.analysis-results.json` when `.findings` is present — the envelope replaced that.
+(`{file, line, severity, message, category, class, fqn, vc}`, messages already
+domain-only) in `/tmp/pc-sync-envelope.json`. Read them straight from that file;
+that is the SUMMARY report. Do **not** scrape `verification/.analysis-findings/`
+or `.analysis-results.json` when `.findings` is present — the envelope replaced
+that. For the full per-finding detail and the finding↔requirement association —
+what the HTML viewer shows — read `<project>/.predictable-code/specs/.data/*.json`
+(see the envelope section above); join on `(fqn, vc)`.
 
 `severity: "error"` = reachable-now (`class: "affecting"`); `severity: "warning"` =
 future-only (`class: "potential"`). In `mechanical` mode (the default) these findings
