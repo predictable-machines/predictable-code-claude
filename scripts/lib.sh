@@ -72,11 +72,50 @@ pc_sync_running() { pgrep -f 'predictable[^ ]* sync' >/dev/null 2>&1; }
 # Append one audit line: `<iso8601> <event> <matcher> <verdict>`. This is the
 # observable side effect the L5 integration tests assert on ("hooks fired"), so
 # it is best-effort but always attempted, even when jq is missing.
-pc_log() { # event matcher verdict
+#
+# ALSO appends a structured JSON line to `hook-events.jsonl`. The plain-text log
+# above is deliberately left byte-identical because tests assert on it; the JSON
+# stream is the machine contract the Predictable Control Center consumes to show
+# what an agent is doing in real time.
+#
+# That second stream is REQUIRED, not a nicety: Claude Code captures its own
+# child processes' output, so when this plugin runs `predictable ... --json` the
+# NDJSON progress never reaches a parent that spawned the agent. Measured on a
+# real fix run — the agent edited the source correctly and the parent observed
+# zero phases. The hook stream is the only way the inside of an agent run is
+# visible.
+#
+# `PREDICTABLE_CC_RUN_ID` is echoed back when present: the Control Center sets it
+# in the agent's environment, and without it concurrent runs cannot be told apart.
+pc_log() { # event matcher verdict [message]
   _pc_data="$(pc_data_dir)"
   mkdir -p "$_pc_data" 2>/dev/null || true
   printf '%s %s %s %s\n' "$(pc_now)" "${1:-?}" "${2:--}" "${3:--}" \
     >>"$_pc_data/hook-events.log" 2>/dev/null || true
+  pc_log_json "$@"
+}
+
+# Emit one JSON object per line. Hand-rolled rather than jq-dependent: `pc_log`
+# must work when jq is absent (the plain-text log already guarantees that), so
+# the JSON stream must not be the one thing that needs it.
+pc_json_escape() { # text
+  printf '%s' "${1:-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/ /g' | tr -d '\n\r'
+}
+
+pc_log_json() { # event matcher verdict [message]
+  _pc_data="$(pc_data_dir)"
+  _pc_run_id="${PREDICTABLE_CC_RUN_ID:-}"
+  _pc_line='{"ts":"'"$(pc_now)"'"'
+  _pc_line="$_pc_line"',"agent":"claude-code"'
+  _pc_line="$_pc_line"',"event":"'"$(pc_json_escape "${1:-?}")"'"'
+  _pc_line="$_pc_line"',"matcher":"'"$(pc_json_escape "${2:--}")"'"'
+  _pc_line="$_pc_line"',"verdict":"'"$(pc_json_escape "${3:--}")"'"'
+  [ -n "${4:-}" ] && _pc_line="$_pc_line"',"message":"'"$(pc_json_escape "$4")"'"'
+  [ -n "$_pc_run_id" ] && _pc_line="$_pc_line"',"runId":"'"$(pc_json_escape "$_pc_run_id")"'"'
+  [ -n "${CLAUDE_SESSION_ID:-}" ] && \
+    _pc_line="$_pc_line"',"sessionId":"'"$(pc_json_escape "$CLAUDE_SESSION_ID")"'"'
+  _pc_line="$_pc_line"'}'
+  printf '%s\n' "$_pc_line" >>"$_pc_data/hook-events.jsonl" 2>/dev/null || true
 }
 
 # Where sync-run persists the last SyncResponse so status-context (and the next
