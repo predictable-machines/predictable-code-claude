@@ -67,7 +67,25 @@ pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 # stdout / pegged CPU). The pattern needs a literal space before `sync` so it hits
 # `predictable sync` / `…/predictable sync` / the test stub `…predictable.sh sync`,
 # but not the hook scripts' own `…/sync-run.sh` paths (no space there).
-pc_sync_running() { pgrep -f 'predictable[^ ]* sync' >/dev/null 2>&1; }
+# A sync is running for THIS project iff the runtime's project sync lock
+# (`.predictable-code/.sync.lock`) names a LIVE pid — the product's own
+# single-sync protocol, so the check is exact and project-scoped. The previous
+# `pgrep -f 'predictable[^ ]* sync'` matched any process whose full command
+# line contained those words (observed live: a leaked watcher shell from an
+# unrelated agent session self-matched forever), which made every hook skip —
+# no session-start sync, no toast, no statusline wiring — until reboot.
+# Without jq, lock presence alone counts; a stale lock (dead pid) is cleared
+# by the runtime itself on its next acquire, so a false "running" self-heals.
+pc_sync_running() {
+  _pc_lock="$(pc_project_dir)/.predictable-code/.sync.lock"
+  [ -f "$_pc_lock" ] || return 1
+  pc_have_jq || return 0
+  _pc_lock_pid="$(jq -r '.pid // 0' "$_pc_lock" 2>/dev/null || printf '0')"
+  case "$_pc_lock_pid" in
+    '' | *[!0-9]*) _pc_lock_pid=0 ;;
+  esac
+  [ "$_pc_lock_pid" -gt 0 ] && kill -0 "$_pc_lock_pid" 2>/dev/null
+}
 
 # Append one audit line: `<iso8601> <event> <matcher> <verdict>`. This is the
 # observable side effect the L5 integration tests assert on ("hooks fired"), so

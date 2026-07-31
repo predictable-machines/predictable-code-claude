@@ -35,12 +35,12 @@ if [ ! -x "$bin" ] && ! command -v predictable >/dev/null 2>&1; then
   exit 0
 fi
 
-# Don't pile onto an in-flight sync (see pc_sync_running — two syncs on one project
-# race the engine into a runaway).
-if pc_sync_running; then
-  pc_log SessionStart session-sync skipped-running
-  exit 0
-fi
+# NOTE: an in-flight sync no longer short-circuits this hook. Only the FIRE of
+# a new sync is skipped (below) — the statusline wiring and the user-facing
+# toast must happen regardless, and skipping them here was exactly how a stuck
+# "running" reading silently killed the whole session-start UX. The runtime's
+# sync lock makes a second launch harmless anyway (it attaches), so the skip is
+# a courtesy, not a safety requirement.
 
 # Deterministic visibility: wire the plugin statusline into the project's
 # .claude/settings.local.json when NO statusLine is configured in any settings
@@ -111,13 +111,16 @@ run_first_sync() {
   fi
 }
 
-if [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ]; then
-  run_first_sync
+if pc_sync_running; then
+  pc_log SessionStart session-sync skipped-running
 else
-  ( run_first_sync ) >/dev/null 2>&1 &
+  if [ "${PREDICTABLE_SYNC_FOREGROUND:-}" = "1" ]; then
+    run_first_sync
+  else
+    ( run_first_sync ) >/dev/null 2>&1 &
+  fi
+  pc_log SessionStart session-sync started
 fi
-
-pc_log SessionStart session-sync started
 # Make the invisible visible. The detached sync above can NEVER appear in the
 # user's shell panel — that panel only shows tasks the agent itself launches —
 # so one combined JSON carries both audiences: a one-line `systemMessage` for

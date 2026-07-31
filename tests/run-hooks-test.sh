@@ -242,17 +242,15 @@ echo "== concurrency guard =="
 
 fresh_data
 # Simulate an in-flight `predictable sync` (argv0 spoofed via exec -a) so the
-# guard must skip rather than start a second, colliding sync.
-( exec -a "predictable sync --json" sleep 5 ) &
-FAKE=$!
-guard_i=0
-while [ "$guard_i" -lt 20 ] && ! pgrep -f 'predictable[^ ]* sync' >/dev/null 2>&1; do
-  sleep 0.1
-  guard_i=$((guard_i + 1))
-done
+# guard must skip rather than start a second, colliding sync. A running sync
+# is detected via the runtime's project sync lock (live pid), so simulate one:
+# this test shell's own pid is alive for the duration.
+mkdir -p "$CLAUDE_PROJECT_DIR/.predictable-code"
+printf '{"pid": %s, "runId": "l1-test", "inputsDigest": "x"}' "$$" \
+  > "$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh stop.json
-kill "$FAKE" 2>/dev/null
+rm -f "$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
 rc=1
 [ "$CODE" -eq 0 ] && [ ! -f "$DATA/session-history.jsonl" ] \
   && grep -q 'skipped-running' "$DATA/hook-events.log" 2>/dev/null && rc=0
