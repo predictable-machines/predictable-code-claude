@@ -24,30 +24,20 @@ cmd="$(jq -r '.tool_input.command // .toolInput.command // ""' "$stdin_json" 2>/
 rm -f "$stdin_json" 2>/dev/null || true
 
 # Gate the version-control commands that publish work; auto-approve the plugin's
-# OWN `predictable sync` so the agent never hits a permission prompt for it; let
-# everything else fall through to the host's normal permission flow.
-case "$cmd" in
-  *"git push"* | *"git commit"*) ;; # fall through to the gate logic below
-  *predictable*" sync"* | *predictable*" init"*)
-    pc_emit_allow "Predictable Code: auto-approving the plugin's own 'predictable' setup/sync command."
-    exit 0
-    ;;
-  *predictable*"agent-verify"*)
-    # The skill records a reviewed fix via `predictable specs requirements
-    # agent-verify` after its own self-review; auto-approve that write.
-    pc_emit_allow "Predictable Code: auto-approving recording an agent-reviewed fix."
-    exit 0
-    ;;
-  *predictable*"specs view"*)
-    # The skill opens the specs viewer with `predictable specs view` (it
-    # regenerates and opens the single HTML surface); auto-approve it.
-    pc_emit_allow "Predictable Code: auto-approving opening the specs viewer."
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+# OWN `predictable` commands so the agent never hits a permission prompt for
+# them; let everything else fall through to the host's normal permission flow.
+#
+# Read with `pc_publishes` / `pc_is_own_command` rather than matched as globs.
+# `*"git commit"*` needs the two words adjacent, so `git -c user.email=… commit`
+# and `git -C /repo push` slipped past a gate that looked like it was working.
+# Publishing is decided FIRST: `git push && predictable sync` publishes, and
+# approving it for its second half would be a way around the gate.
+if ! pc_publishes "$cmd"; then
+  if pc_is_own_command "$cmd"; then
+    pc_emit_allow "Predictable Code: auto-approving the plugin's own \`predictable\` command."
+  fi
+  exit 0
+fi
 
 project="$(pc_project_dir)"
 bin="$(pc_predictable_bin)"

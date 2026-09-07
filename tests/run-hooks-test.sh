@@ -15,6 +15,11 @@ ERRFILE=$(mktemp)
 trap 'rm -f "$ERRFILE"' EXIT
 
 fresh_data() {
+  # A `VAR=x run_hook …` prefix on a FUNCTION call persists in the shell after
+  # it returns, so a stub knob set by one test silently governed every later one
+  # — a `STUB_FAIL=1` four tests up turned a deny case into an infra-error
+  # allow, and the test read as a broken gate rather than a leaked variable.
+  unset STUB_FAIL STUB_VERDICT
   DATA=$(mktemp -d)
   export CLAUDE_PLUGIN_DATA="$DATA"
   PROJ=$(mktemp -d)
@@ -93,6 +98,32 @@ STUB_FAIL=1 run_hook sync-gate.sh pre-tool-use-git-push.json
 [ "$CODE" -eq 0 ] && contains "$OUT" 'systemMessage' && ! contains "$OUT" 'deny'
 check "git push + sync infra error -> allow + systemMessage (never trap)" $? "exit $CODE out=$OUT"
 
+# git's global options sit between the program and its subcommand, so a glob
+# needing the two words adjacent never matched these — the gate ran, looked
+# healthy, and let them through. Caught by checking HEAD, not by the gate.
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" \
+  run_hook sync-gate.sh pre-tool-use-git-commit-options.json
+rc=1
+[ "$CODE" -eq 2 ] && contains "$OUT" '"permissionDecision": "deny"' && rc=0
+check "git -c … commit + specViolation -> deny (options do not hide the subcommand)" "$rc" "exit $CODE out=$OUT"
+
+# Publishing is decided before auto-approval, or the second half of the line
+# would be a way around the gate.
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push-ridealong.json
+rc=1
+[ "$CODE" -eq 2 ] && contains "$OUT" '"permissionDecision": "deny"' && rc=0
+check "git push && predictable sync -> deny (no ride-along approval)" "$rc" "exit $CODE out=$OUT"
+
+# A read-only git command that merely contains the word must not run a check.
+fresh_data
+run_hook sync-gate.sh pre-tool-use-git-log.json
+rc=1
+[ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
+check "git log --grep=commit -> passthrough (no check)" "$rc" "exit $CODE out=$OUT"
+
 fresh_data
 run_hook sync-gate.sh pre-tool-use-predictable-sync.json
 rc=1
@@ -106,10 +137,10 @@ contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
 check "predictable init -> auto-allow (setup runs without prompt)" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
-run_hook sync-gate.sh pre-tool-use-specs-view.json
+run_hook sync-gate.sh pre-tool-use-serve.json
 rc=1
 contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
-check "predictable specs view -> auto-allow (viewer opens without prompt)" "$rc" "exit $CODE out=$OUT"
+check "predictable serve -> auto-allow (the Control Center opens without prompt)" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
 run_hook sync-gate.sh pre-tool-use-agent-verify.json

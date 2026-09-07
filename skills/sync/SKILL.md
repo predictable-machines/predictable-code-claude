@@ -120,19 +120,22 @@ render — the envelope file is still written; read it anyway. Then:
    file **is** the JSON envelope. Post `✅ Check complete`, then report per below.
    If the run failed (no envelope written), translate the problem to plain
    language — never surface internal / build / engine text.
-4. **Open the report for the user, automatically.** Regenerate and open the
-   single HTML surface — the **specs viewer** — in ONE background Bash call (the
-   plugin's gate auto-approves this exact command, so no permission prompt):
+4. **Open the report for the user, automatically.** Start the **Control
+   Center** — the local web app showing the findings and the requirements
+   inferred per function — with the Bash tool, `run_in_background: true` (the
+   plugin's gate auto-approves it, so no permission prompt):
 
    ```sh
-   predictable specs view 2>/dev/null || true
+   predictable serve --no-open
    ```
 
-   `predictable specs view` writes the fresh viewer (findings + the inferred
-   requirements per function, with every status distinctly rendered) and opens it
-   in the browser, printing its `file://` path. Post that path in chat too — on a
-   remote / SSH / headless host the browser open silently no-ops, and the link is
-   the fallback. Never let this step fail the turn (`|| true`).
+   It is a SERVER: it holds its port until stopped, so it must be a background
+   call or the turn never returns. It reuses the run already listening rather
+   than starting a second one. Post the address it prints —
+   `http://127.0.0.1:7473` unless the port was taken — as a clickable link;
+   `--no-open` stops it trying to open a browser, which is a no-op on a remote or
+   headless host anyway. Never let this step fail the turn: the findings were
+   already reported and the report is a convenience on top of them.
 
    The envelope in `/tmp/pc-sync-envelope.json` is
    `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ], "requirements": [ … ] }`:
@@ -141,7 +144,14 @@ render — the envelope file is still written; read it anyway. Then:
      /tmp/pc-sync-envelope.json` handles both).
    - **findings** = `.findings[]` — each is `{file, line, severity ("error"=affecting
      / "warning"=potential), message (plain-English, already domain-only), category,
-     class, fqn, vc}`. **This is the summary report** — read it straight from that
+     defectClass, priority, class, fqn, vc, witness?}`. **`priority` is the
+     product's own reading order — `1` first — so rank by it rather than
+     inventing your own; `defectClass` names the failure mode
+     (`null-dereference`, `bounds`, `arithmetic`, `domain-guard`, …) where
+     `category` lumps every throw together, so group by `defectClass` when the
+     user asks what KIND of issues there are. `witness` is present only when a
+     finding was reproduced by EXECUTION, which ranks it above an unwitnessed
+     one.** **This is the summary report** — read it straight from that
      file; do NOT scrape `verification/.analysis-findings/` when `.findings` is
      present. `fqn` + `vc` are JOIN KEYS into the machine viewer data (below).
    - **requirements** = `.requirements[]` — every requirement across the project's
@@ -267,16 +277,15 @@ fix. No Artifact, no funnel.
 
 **Large result (more than that, up to thousands):**
 
-1. **Open the specs viewer Predictable generates.** Run `predictable specs view`
-   (the gate auto-approves it): it writes the single self-contained HTML surface
-   (full grouped, scrollable enumeration; no external assets) and opens it,
-   printing its `file://` path. Post that **clickable `file://` link** — it works
-   everywhere (terminal, IDE, Desktop). Do **not** fabricate your own Artifact for
-   this: an Artifact does not render as an openable link in a terminal / IDE, and
-   the viewer already exists on disk. Always ALSO post a short **text rollup** (the
-   tier / category counts) inline as the at-a-glance summary. On Desktop/web you
-   MAY *additionally* publish an Artifact for a richer hosted view — but never
-   INSTEAD of the `file://` link.
+1. **Open the Control Center.** Run `predictable serve --no-open` as a
+   BACKGROUND Bash call (the gate auto-approves it): it serves the full grouped,
+   scrollable enumeration and prints its address. Post that **clickable link** —
+   it works everywhere (terminal, IDE, Desktop). Do **not** fabricate your own
+   Artifact for this: an Artifact does not render as an openable link in a
+   terminal / IDE, and the Control Center is the surface the product maintains.
+   Always ALSO post a short **text rollup** (the tier / category counts) inline
+   as the at-a-glance summary. On Desktop/web you MAY *additionally* publish an
+   Artifact for a richer hosted view — but never INSTEAD of the link.
 2. **Then drive a short funnel of `AskUserQuestion` decisions — most-critical
    first, each option a BATCH (never an individual finding), always with a
    recommended default.** Use `multiSelect` where several batches can be picked:
@@ -292,11 +301,11 @@ fix. No Artifact, no funnel.
 
 ## Rich views (the generated report + optional Artifacts)
 
-The **primary** rich view is the **specs viewer** Predictable regenerates on every
-check — open it with `predictable specs view`, a self-contained page with the
-findings and the inferred requirements per function (every status distinctly
-rendered). It prints a `file://` path; surface that link. It opens in the terminal,
-the IDE, and the browser. That is what the user opens to *see* everything.
+The **primary** rich view is the **Control Center** — start it with
+`predictable serve --no-open` as a background call, a local web app with the
+findings and the requirements inferred per function (every status distinctly
+rendered). It prints its address; surface that link. That is what the user opens
+to *see* everything.
 
 Artifacts are an OPTIONAL extra for Desktop/web only (they do NOT render as an
 openable link in a plain terminal / IDE), so never rely on one as the sole report

@@ -49,6 +49,92 @@ pc_askquestion_rule() {
   printf '%s' 'AskUserQuestion (always apply): never add an "Other" / "Something else" / "None of these" / free-text / "write whatever you want" option to any question — the tool ALWAYS appends its own "Other" free-text choice, so adding one is a duplicate. List only concrete, mutually-exclusive options and let the built-in "Other" cover the rest.'
 }
 
+# --- Reading a command line well enough to gate it ------------------------
+#
+# A glob is not good enough, and it fails in the worst direction: silently, and
+# towards letting things through. `*"git commit"*` needs the two words adjacent,
+# but git's global options sit between the program and its subcommand, so
+# `git -c user.email=… commit`, `git -C /repo push` and `git --no-pager commit`
+# never matched — the gate ran, looked healthy, and waved them past. Found by
+# checking that HEAD had not moved, not by anything the gate itself said.
+#
+# Two rules do it properly. Segment first, because `git push && predictable sync`
+# is a push with a Predictable command attached and must not be auto-approved on
+# its second half. Then walk tokens the way git does, skipping the global options
+# — including the ones that consume the NEXT token as their value.
+
+# Split a command line into independently-executed pieces, one per line.
+# Separators and the grouping characters that would hide a command from a token
+# walk (`$(`, backticks, parens) all become boundaries, so `$(git push)` reads as
+# its own segment rather than as an opaque argument to `echo`.
+pc_segments() { # command
+  # shellcheck disable=SC2016  # `$(` here is literal text being replaced, not an expansion.
+  # The trailing newline matters: `read` returns false at EOF, so a line without
+  # one is never seen by a `while read` loop — a single-segment `git commit`
+  # silently produced no segments at all.
+  printf '%s\n' "$1" |
+    sed -e 's/\$(/;/g' -e 's/[()`]/;/g' -e 's/&&/;/g' -e 's/||/;/g' -e 's/[|&]/;/g' |
+    tr ';' '\n'
+}
+
+# The git subcommand one segment runs, or empty when it does not run git.
+# Skips leading VAR=value assignments and wrappers (env, sudo, …), then git's
+# own global options; `-c`, `-C`, `--git-dir`, `--work-tree`, `--namespace`,
+# `--exec-path` and `--config-env` swallow the token after them.
+pc_git_subcommand() { # segment
+  awk '
+    function base(p) { sub(/^.*\//, "", p); return p }
+    {
+      i = 1
+      while (i <= NF && ($i ~ /^[A-Za-z_][A-Za-z0-9_]*=/ ||
+             base($i) == "env" || base($i) == "sudo" || base($i) == "command" ||
+             base($i) == "nice" || base($i) == "time")) i++
+      if (i > NF || base($i) != "git") exit
+      i++
+      while (i <= NF) {
+        t = $i
+        if (substr(t, 1, 1) != "-") { print t; exit }
+        if (t == "-c" || t == "-C" || t == "--git-dir" || t == "--work-tree" ||
+            t == "--namespace" || t == "--exec-path" || t == "--config-env") i += 2
+        else i += 1
+      }
+    }
+  ' <<EOF
+$1
+EOF
+}
+
+# True when any segment runs one of the publishing subcommands.
+pc_publishes() { # command
+  pc_segments "$1" | while IFS= read -r _pc_seg; do
+    case " $(pc_git_subcommand "$_pc_seg") " in
+      " push " | " commit ") printf 'yes' ;;
+    esac
+  done | grep -q yes
+}
+
+# True when EVERY segment runs one of Predictable's own verbs. Every, not any:
+# `git push && predictable sync` must not be approved on its second half.
+pc_is_own_command() { # command
+  _pc_any=0
+  _pc_all=1
+  while IFS= read -r _pc_seg; do
+    [ -n "$_pc_seg" ] || continue
+    _pc_any=1
+    case "$_pc_seg" in
+      *predictable*) ;;
+      *) _pc_all=0; continue ;;
+    esac
+    case "$_pc_seg" in
+      *" sync"* | *" init"* | *" serve"* | *agent-verify* | *" settings"* | *" project"* | *" open"*) ;;
+      *) _pc_all=0 ;;
+    esac
+  done <<EOF
+$(pc_segments "$1")
+EOF
+  [ "$_pc_any" -eq 1 ] && [ "$_pc_all" -eq 1 ]
+}
+
 pc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 pc_have_jq() { command -v jq >/dev/null 2>&1; }
