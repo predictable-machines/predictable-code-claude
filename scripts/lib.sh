@@ -139,6 +139,24 @@ pc_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 pc_have_jq() { command -v jq >/dev/null 2>&1; }
 
+# The host session this hook runs for, exported as PREDICTABLE_SESSION_ID so a
+# signed-in `predictable sync` reports every check of one session as ONE run in
+# the Control Center instead of a row per check. These hooks sync at session
+# start, at every turn end and before every commit or push, so one session is
+# many syncs. Read from the hook's own `session_id` rather than trusting that the
+# host put its session in the environment; a value already set wins. Never fails:
+# no jq or no id simply leaves the variable unset.
+pc_export_session() { # stdin-json-file
+  [ -n "${PREDICTABLE_SESSION_ID:-}" ] && return 0
+  pc_have_jq || return 0
+  pc_session_id="$(jq -r '.session_id // ""' "$1" 2>/dev/null || printf '')"
+  if [ -n "$pc_session_id" ]; then
+    PREDICTABLE_SESSION_ID="$pc_session_id"
+    export PREDICTABLE_SESSION_ID
+  fi
+  return 0
+}
+
 # `predictable sync --claude` auto-initializes the project (Claude defaults + source
 # detection) when it isn't set up yet, so the plugin never has to init itself — it
 # just always runs `sync --json --claude`. `pc_is_configured` is used only for

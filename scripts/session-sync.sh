@@ -18,6 +18,7 @@ self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 
 stdin_json=$(mktemp 2>/dev/null || echo "/tmp/pc-session-sync.$$")
 cat >"$stdin_json"
+pc_export_session "$stdin_json"
 src="$(jq -r '.source // ""' "$stdin_json" 2>/dev/null || echo "")"
 rm -f "$stdin_json" 2>/dev/null || true
 

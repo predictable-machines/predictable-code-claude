@@ -19,7 +19,7 @@ fresh_data() {
   # it returns, so a stub knob set by one test silently governed every later one
   # — a `STUB_FAIL=1` four tests up turned a deny case into an infra-error
   # allow, and the test read as a broken gate rather than a leaked variable.
-  unset STUB_FAIL STUB_VERDICT
+  unset STUB_FAIL STUB_VERDICT STUB_SESSION_OUT PREDICTABLE_SESSION_ID
   DATA=$(mktemp -d)
   export CLAUDE_PLUGIN_DATA="$DATA"
   PROJ=$(mktemp -d)
@@ -300,6 +300,19 @@ fresh_data
 run_hook status-context.sh user-prompt-submit.json
 [ "$CODE" -eq 0 ] && contains "$OUT" 'no check'
 check "UserPromptSubmit with no verdict -> 'no check yet' context" $? "exit $CODE out=$OUT"
+
+echo "== session =="
+# Every sync a hook starts names the session it runs for, so the Control Center
+# keeps one run per session rather than a row per turn-end check.
+fresh_data
+SESSION_OUT=$(mktemp)
+STUB_SESSION_OUT="$SESSION_OUT" STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" \
+  PREDICTABLE_SYNC_FOREGROUND=1 run_hook sync-run.sh stop.json
+GOT_SESSION=$(cat "$SESSION_OUT")
+contains "<$GOT_SESSION>" "<fixture-session>"
+check "a turn-end sync carries the hook's session_id as PREDICTABLE_SESSION_ID" $? "got=$GOT_SESSION"
+rm -f "$SESSION_OUT"
+unset STUB_SESSION_OUT
 
 echo "== bootstrap =="
 

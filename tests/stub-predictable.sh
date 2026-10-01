@@ -13,6 +13,11 @@ case "$1" in
     ;;
 esac
 
+# Record the session the hook handed the sync, for the test that checks it.
+if [ -n "${STUB_SESSION_OUT:-}" ]; then
+  printf '%s' "${PREDICTABLE_SESSION_ID:-}" >"$STUB_SESSION_OUT"
+fi
+
 if [ "${STUB_FAIL:-}" = "1" ]; then
   echo "stub: simulated sync failure" >&2
   exit 1

@@ -24,6 +24,7 @@ self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 
 stdin_json=$(mktemp 2>/dev/null || echo "/tmp/pc-sync-run.$$")
 cat >"$stdin_json"
+pc_export_session "$stdin_json"
 event="$(pc_read_event "$stdin_json")"
 [ "$event" = "-" ] && event="Stop"
 
