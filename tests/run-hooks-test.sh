@@ -282,6 +282,20 @@ rc=1
 [ "$iss" = "63" ] && rc=0
 check "metric counts the sync's findingsTotal (63)" "$rc" "issues=$iss"
 
+# The ENVELOPE `sync --json` writes today carries the verdict under `.result`, with `findings`
+# as its first key: read as the bare shape it found no count and summed another denominator
+# (measured: 911 beside a status line saying 48).
+fresh_data
+mkdir -p "$CLAUDE_PROJECT_DIR/.predictable-code/verification"
+printf '{"findingsAffecting": 600, "findingsPotential": 311}' \
+  >"$CLAUDE_PROJECT_DIR/.predictable-code/verification/.analysis-results.json"
+STUB_VERDICT="$ROOT/fixtures/verdict-mechanical-envelope.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+iss=$(jq -r '.issues' "$DATA/session-history.jsonl" 2>/dev/null | tail -1)
+rc=1
+[ "$iss" = "48" ] && rc=0
+check "metric reads findingsTotal out of the envelope (48), not the analysis sum (911)" "$rc" "issues=$iss"
+
 echo "== envelope verdict parsing (#1236) =="
 
 # pc_verdict_name reads the verdict from the new envelope (.result) and the older

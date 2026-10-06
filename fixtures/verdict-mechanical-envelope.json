@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "result": {
+    "mechanical": {
+      "specsChecked": 605,
+      "requirementsViolated": 1,
+      "requirementsVerified": 38,
+      "requirementsInferred": 20,
+      "functionsWithIssues": 33,
+      "findingsTotal": 48
+    }
+  },
+  "findings": [
+    {
+      "severity": "warning"
+    }
+  ],
+  "requirements": []
+}

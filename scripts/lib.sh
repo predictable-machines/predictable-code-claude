@@ -314,7 +314,11 @@ pc_reset_session_history() { rm -f "$(pc_session_history_file)" 2>/dev/null || t
 # fields degrade to 0.
 pc_issue_count() { # verdict-file
   if [ -f "$1" ] && pc_have_jq; then
-    _pc_n="$(jq -r '(.[keys[0]] | objects | .findingsTotal) // empty' "$1" 2>/dev/null)"
+    # The verdict lives under `.result` in the envelope `sync --json` writes (#1236), and is the
+    # whole object in the older bare shape — the rule `pc_verdict_name` reads it by. Reading the
+    # bare shape alone took the envelope's FIRST key (`findings`) as the verdict, found no count
+    # there, and fell through to a different denominator: 911 beside a status line saying 48.
+    _pc_n="$(jq -r '(.result // .) | (.[keys[0]] | objects | .findingsTotal) // empty' "$1" 2>/dev/null)"
     if [ -n "$_pc_n" ]; then
       printf '%s' "$_pc_n"
       return 0
