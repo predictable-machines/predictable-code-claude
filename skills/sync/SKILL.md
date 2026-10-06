@@ -120,22 +120,19 @@ render — the envelope file is still written; read it anyway. Then:
    file **is** the JSON envelope. Post `✅ Check complete`, then report per below.
    If the run failed (no envelope written), translate the problem to plain
    language — never surface internal / build / engine text.
-4. **Open the report for the user, automatically.** Start the **Control
-   Center** — the local web app showing the findings and the requirements
-   inferred per function — with the Bash tool, `run_in_background: true` (the
-   plugin's gate auto-approves it, so no permission prompt):
+4. **Link the report for the user, automatically.** The **Control Center** is
+   hosted: it shows the findings and the requirements inferred per function for
+   the analysis this sync published. Get this project's link with the Bash tool
+   (the plugin's gate auto-approves it, so no permission prompt):
 
    ```sh
-   predictable serve --no-open
+   "${CLAUDE_PLUGIN_ROOT}/scripts/control-center-url.sh"
    ```
 
-   It is a SERVER: it holds its port until stopped, so it must be a background
-   call or the turn never returns. It reuses the run already listening rather
-   than starting a second one. Post the address it prints —
-   `http://127.0.0.1:7473` unless the port was taken — as a clickable link;
-   `--no-open` stops it trying to open a browser, which is a no-op on a remote or
-   headless host anyway. Never let this step fail the turn: the findings were
-   already reported and the report is a convenience on top of them.
+   It prints one line: exit 0 is the link, post it as a clickable link; exit 1 is
+   why there is none (not signed in, no GitHub `origin`), say it in one plain line.
+   Never let this step fail the turn: the findings were already reported and the
+   Control Center is a convenience on top of them.
 
    The envelope in `/tmp/pc-sync-envelope.json` is
    `{ "schemaVersion", "result": { "<verdict>": {…} }, "findings": [ … ], "requirements": [ … ] }`:
@@ -277,9 +274,9 @@ fix. No Artifact, no funnel.
 
 **Large result (more than that, up to thousands):**
 
-1. **Open the Control Center.** Run `predictable serve --no-open` as a
-   BACKGROUND Bash call (the gate auto-approves it): it serves the full grouped,
-   scrollable enumeration and prints its address. Post that **clickable link** —
+1. **Link the Control Center.** Run `"${CLAUDE_PLUGIN_ROOT}/scripts/control-center-url.sh"`
+   (the gate auto-approves it): the hosted Control Center holds the full grouped,
+   scrollable enumeration, and the script prints this project's link. Post that **clickable link** —
    it works everywhere (terminal, IDE, Desktop). Do **not** fabricate your own
    Artifact for this: an Artifact does not render as an openable link in a
    terminal / IDE, and the Control Center is the surface the product maintains.
@@ -301,15 +298,14 @@ fix. No Artifact, no funnel.
 
 ## Rich views (the generated report + optional Artifacts)
 
-The **primary** rich view is the **Control Center** — start it with
-`predictable serve --no-open` as a background call, a local web app with the
+The **primary** rich view is the **Control Center** — the hosted app with the
 findings and the requirements inferred per function (every status distinctly
-rendered). It prints its address; surface that link. That is what the user opens
-to *see* everything.
+rendered). `"${CLAUDE_PLUGIN_ROOT}/scripts/control-center-url.sh"` prints this
+project's link; surface it. That is what the user opens to *see* everything.
 
 Artifacts are an OPTIONAL extra for Desktop/web only (they do NOT render as an
 openable link in a plain terminal / IDE), so never rely on one as the sole report
-surface — always give the `file://` link first, and pair any Artifact with a short
+surface — always give the Control Center link first, and pair any Artifact with a short
 text summary. When it helps, you MAY additionally offer (don't force):
 
 - **Stats / branding dashboard** — "Predictable caught N issues, you fixed M, all

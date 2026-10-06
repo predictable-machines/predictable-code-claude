@@ -121,12 +121,24 @@ pc_is_own_command() { # command
   while IFS= read -r _pc_seg; do
     [ -n "$_pc_seg" ] || continue
     _pc_any=1
+    # The report command's link script, and ONLY as the whole segment: a script path
+    # merely mentioned inside another command must not carry that command through.
+    _pc_trim=$(printf '%s' "$_pc_seg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    # The first two spellings are the command TEXT the agent runs, unexpanded, so the
+    # `${…}` in them is literal on purpose.
+    # shellcheck disable=SC2016
+    case "$_pc_trim" in
+      '"${CLAUDE_PLUGIN_ROOT}/scripts/control-center-url.sh"' | \
+        '${CLAUDE_PLUGIN_ROOT}/scripts/control-center-url.sh' | \
+        "\"${CLAUDE_PLUGIN_ROOT:-/nonexistent}/scripts/control-center-url.sh\"" | \
+        "${CLAUDE_PLUGIN_ROOT:-/nonexistent}/scripts/control-center-url.sh") continue ;;
+    esac
     case "$_pc_seg" in
       *predictable*) ;;
       *) _pc_all=0; continue ;;
     esac
     case "$_pc_seg" in
-      *" sync"* | *" init"* | *" serve"* | *agent-verify* | *" settings"* | *" project"* | *" open"*) ;;
+      *" sync"* | *" init"* | *agent-verify* | *" settings"* | *" project"* | *" open"*) ;;
       *) _pc_all=0 ;;
     esac
   done <<EOF
@@ -293,15 +305,25 @@ pc_session_history_file() { printf '%s/session-history.jsonl' "$(pc_data_dir)"; 
 
 pc_reset_session_history() { rm -f "$(pc_session_history_file)" 2>/dev/null || true; }
 
-# Actionable-issue count for a sync. PREFERS the SMT analysis findings — the real
-# caught faults (`findingsAffecting`, reachable-now) in the project's
-# `.analysis-results.json` — because the verdict counters miss them entirely under
-# `mechanical` (proving off by default). Falls back to the SyncResponse verdict
-# counters when no analysis results are present. Missing fields degrade to 0.
+# Actionable-issue count for a sync. PREFERS the sync's own `findingsTotal` — the
+# number the Control Center shows for the same analysis — then the analysis
+# results' findings, REACHABLE-NOW AND POTENTIAL both: a finding whose callers were
+# not established is reported, not clean, and counting `findingsAffecting` alone
+# told the agent "5 issues" over an analysis the Control Center listed 63 for.
+# Falls back to the SyncResponse verdict counters when neither is present. Missing
+# fields degrade to 0.
 pc_issue_count() { # verdict-file
+  if [ -f "$1" ] && pc_have_jq; then
+    _pc_n="$(jq -r '(.[keys[0]] | objects | .findingsTotal) // empty' "$1" 2>/dev/null)"
+    if [ -n "$_pc_n" ]; then
+      printf '%s' "$_pc_n"
+      return 0
+    fi
+  fi
   _pc_ar="$(pc_analysis_results_file)"
   if [ -f "$_pc_ar" ] && pc_have_jq; then
-    _pc_n="$(jq -r '.findingsAffecting // empty' "$_pc_ar" 2>/dev/null)"
+    _pc_n="$(jq -r 'if (.findingsAffecting // null) == null then empty
+                    else (.findingsAffecting + (.findingsPotential // 0)) end' "$_pc_ar" 2>/dev/null)"
     if [ -n "$_pc_n" ]; then
       printf '%s' "$_pc_n"
       return 0
@@ -363,7 +385,7 @@ pc_session_summary() {
          elif $fixed > 0 then
            "Predictable: \($fixed) of \($peak) issue(s) fixed so far, \($cur) remaining, over \($iters) sync(s) — keep fixing until inSync."
          else
-           "Predictable: \($cur) issue(s) open (\($iters) sync(s)). See verification/.analysis-results.json."
+           "Predictable: \($cur) issue(s) open (\($iters) sync(s)). /predictable-code:report opens them in the Control Center."
          end)
       + (if $gate > 0 then " · gate blocked \($gate) push(es) while out of sync." else "" end)
     end

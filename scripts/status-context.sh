@@ -51,7 +51,7 @@ elif ! pc_is_configured; then
 elif [ "$verdict" = "-" ]; then
   body="Predictable Code: $(pc_verdict_summary "$verdict") to check this project against its spec."
 else
-  body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: verification/.analysis-results.json. Re-run predictable sync after edits."
+  body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: .predictable-code/specs/.data/findings.json. Re-run predictable sync after edits."
 fi
 
 # Live-check beacon: the product's project sync lock (`.predictable-code/.sync.lock`)

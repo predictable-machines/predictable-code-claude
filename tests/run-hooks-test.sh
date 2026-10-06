@@ -137,10 +137,24 @@ contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
 check "predictable init -> auto-allow (setup runs without prompt)" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
-run_hook sync-gate.sh pre-tool-use-serve.json
+run_hook sync-gate.sh pre-tool-use-report-link.json
 rc=1
 contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
-check "predictable serve -> auto-allow (the Control Center opens without prompt)" "$rc" "exit $CODE out=$OUT"
+check "the report's Control Center link -> auto-allow (opens without prompt)" "$rc" "exit $CODE out=$OUT"
+
+# The link script carries only ITSELF: named inside another command it approves nothing.
+fresh_data
+run_hook sync-gate.sh pre-tool-use-report-link-smuggled.json
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$OUT" '"permissionDecision": "allow"' && rc=0
+check "a command merely naming the link script -> NOT auto-allowed" "$rc" "exit $CODE out=$OUT"
+
+# `predictable serve` is a deleted verb: nothing auto-approves it any more.
+fresh_data
+run_hook sync-gate.sh pre-tool-use-serve.json
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$OUT" '"permissionDecision": "allow"' && rc=0
+check "predictable serve (deleted) -> NOT auto-allowed" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
 run_hook sync-gate.sh pre-tool-use-agent-verify.json
@@ -243,8 +257,9 @@ check "SessionStart non-git dir -> no-op (never scaffold)" "$rc" "verdict=$([ -f
 
 echo "== metric counts analysis findings =="
 
-# pc_issue_count prefers findingsAffecting from the project's analysis results over
-# the verdict counters (inSync would otherwise count 0).
+# pc_issue_count, with no `findingsTotal` in the verdict, counts the analysis results'
+# findings — reachable-now AND potential — over the verdict counters (inSync would
+# otherwise count 0).
 fresh_data
 mkdir -p "$CLAUDE_PROJECT_DIR/.predictable-code/verification"
 printf '{"findingsAffecting": 7, "findingsPotential": 3}' \
@@ -253,8 +268,19 @@ STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 
   run_hook sync-run.sh stop.json
 iss=$(jq -r '.issues' "$DATA/session-history.jsonl" 2>/dev/null | tail -1)
 rc=1
-[ "$iss" = "7" ] && rc=0
-check "metric counts analysis findingsAffecting (7), not the inSync verdict (0)" "$rc" "issues=$iss"
+[ "$iss" = "10" ] && rc=0
+check "metric counts affecting + potential findings (10), not the inSync verdict (0)" "$rc" "issues=$iss"
+
+# And the sync's own `findingsTotal` wins when the verdict carries one: it is the number the
+# Control Center shows for the same analysis. Measured: "5 issue(s) open" from
+# `findingsAffecting` alone, over an analysis listing 63.
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+iss=$(jq -r '.issues' "$DATA/session-history.jsonl" 2>/dev/null | tail -1)
+rc=1
+[ "$iss" = "63" ] && rc=0
+check "metric counts the sync's findingsTotal (63)" "$rc" "issues=$iss"
 
 echo "== envelope verdict parsing (#1236) =="
 

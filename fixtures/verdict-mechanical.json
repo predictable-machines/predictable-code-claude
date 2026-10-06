@@ -1,0 +1,10 @@
+{
+  "mechanical": {
+    "specsChecked": 607,
+    "requirementsViolated": 2,
+    "requirementsVerified": 39,
+    "requirementsInferred": 67,
+    "functionsWithIssues": 40,
+    "findingsTotal": 63
+  }
+}
