@@ -9,8 +9,8 @@
 # a hook-detached sync — the thing no shell panel can ever display.
 #
 # One line: model · project dir · Predictable state, read from the runtime's
-# two files: `.predictable-code/.sync.lock` (a LIVE pid = a sync is running
-# right now) and `.predictable-code/.last-sync-response.json` (last verdict).
+# two files in the branch's state directory: `.sync.lock` (a LIVE pid = a sync
+# is running right now) and `.last-sync-response.json` (last verdict).
 
 input=$(cat)
 
@@ -23,8 +23,16 @@ project=$(printf '%s' "$input" | jq -r '.workspace.project_dir // .cwd // ""' 2>
 model=$(printf '%s' "$input" | jq -r '.model.display_name // ""' 2>/dev/null || printf '')
 
 segment=""
-lock="$project/.predictable-code/.sync.lock"
-result="$project/.predictable-code/.last-sync-response.json"
+# In a git checkout `.predictable-code/` is the DATABASE (a worktree of
+# `predictable-code-database`, its `.git` a file), and the branch's state is its
+# entry; the same rule as `pc_state_dir`, which this script cannot source.
+state="$project/.predictable-code"
+if [ -n "$project" ] && [ -f "$state/.git" ]; then
+  branch=$(git -C "$project" symbolic-ref --quiet --short HEAD 2>/dev/null || printf '.detached')
+  state="$state/$branch/.predictable-code"
+fi
+lock="$state/.sync.lock"
+result="$state/.last-sync-response.json"
 
 if [ -n "$project" ] && [ -f "$lock" ]; then
   lock_pid=$(jq -r '.pid // 0' "$lock" 2>/dev/null || printf '0')

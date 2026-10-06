@@ -174,6 +174,23 @@ pc_export_session() { # stdin-json-file
 # just always runs `sync --json --claude`. `pc_is_configured` is used only for
 # read-only status messaging (status-context), never as a gate on running sync.
 pc_config_file() { printf '%s/.predictable-code/project.json' "$(pc_project_dir)"; }
+
+# The checked-out branch's STATE DIRECTORY, where the runtime keeps its lock, its
+# last verdict, the datasets and the analysis results. In a git checkout
+# `.predictable-code/` is the DATABASE — a worktree of the `predictable-code-database`
+# branch, whose `.git` is a FILE — and each branch's state is its entry in it
+# (`<db>/<branch>/.predictable-code`, a detached HEAD's under `.detached`); anywhere
+# else it is `.predictable-code/` itself. `project.json` is at the database's root
+# either way, which is why `pc_config_file` needs none of this.
+pc_state_dir() {
+  _pc_db="$(pc_project_dir)/.predictable-code"
+  if [ -f "$_pc_db/.git" ]; then
+    _pc_branch="$(git -C "$(pc_project_dir)" symbolic-ref --quiet --short HEAD 2>/dev/null || printf '.detached')"
+    printf '%s/%s/.predictable-code' "$_pc_db" "$_pc_branch"
+  else
+    printf '%s' "$_pc_db"
+  fi
+}
 pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 
 # True when another `predictable … sync` is already running anywhere on this box:
@@ -184,7 +201,7 @@ pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 # `predictable sync` / `…/predictable sync` / the test stub `…predictable.sh sync`,
 # but not the hook scripts' own `…/sync-run.sh` paths (no space there).
 # A sync is running for THIS project iff the runtime's project sync lock
-# (`.predictable-code/.sync.lock`) names a LIVE pid — the product's own
+# (`.sync.lock` in the branch's state directory) names a LIVE pid — the product's own
 # single-sync protocol, so the check is exact and project-scoped. The previous
 # `pgrep -f 'predictable[^ ]* sync'` matched any process whose full command
 # line contained those words (observed live: a leaked watcher shell from an
@@ -193,7 +210,7 @@ pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 # Without jq, lock presence alone counts; a stale lock (dead pid) is cleared
 # by the runtime itself on its next acquire, so a false "running" self-heals.
 pc_sync_running() {
-  _pc_lock="$(pc_project_dir)/.predictable-code/.sync.lock"
+  _pc_lock="$(pc_state_dir)/.sync.lock"
   [ -f "$_pc_lock" ] || return 1
   pc_have_jq || return 0
   _pc_lock_pid="$(jq -r '.pid // 0' "$_pc_lock" 2>/dev/null || printf '0')"
@@ -221,7 +238,7 @@ pc_last_verdict_file() { printf '%s/last-verdict.json' "$(pc_data_dir)"; }
 # here (the reachable-now caught faults) is the ground-truth issue count — the
 # verdict counters miss it entirely under `mechanical` (proving off by default).
 pc_analysis_results_file() {
-  printf '%s/.predictable-code/verification/.analysis-results.json' "$(pc_project_dir)"
+  printf '%s/verification/.analysis-results.json' "$(pc_state_dir)"
 }
 
 # SyncResponse is `{constructorName: {…}}`; the constructor name IS the verdict.

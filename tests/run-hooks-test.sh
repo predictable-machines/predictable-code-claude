@@ -309,6 +309,30 @@ rc=1
 [ "$v_env" = "mechanical" ] && [ "$v_bare" = "inSync" ] && rc=0
 check "pc_verdict_name handles envelope (.result) + bare shapes" "$rc" "env=$v_env bare=$v_bare"
 
+echo "== the database layout =="
+
+# In a git checkout `.predictable-code/` is the database (a worktree, its `.git` a FILE), and the
+# runtime's state for the checked-out branch is that branch's entry — `feature/x` included, whose
+# name holds a slash. Elsewhere it is `.predictable-code/` itself.
+fresh_data
+git -C "$CLAUDE_PROJECT_DIR" init -q -b feature/x
+printf 'gitdir: /elsewhere\n' >"$CLAUDE_PROJECT_DIR/.predictable-code/.git"
+state=$( . "$ROOT/scripts/lib.sh"; pc_state_dir )
+rc=1
+[ "$state" = "$CLAUDE_PROJECT_DIR/.predictable-code/feature/x/.predictable-code" ] && rc=0
+check "pc_state_dir is the checked-out branch's entry in a database" "$rc" "state=$state"
+mkdir -p "$state"
+printf '{"pid": %s, "runId": "l1-test", "inputsDigest": "x"}' "$$" >"$state/.sync.lock"
+running=$( . "$ROOT/scripts/lib.sh"; pc_sync_running && echo yes || echo no )
+rc=1
+[ "$running" = "yes" ] && rc=0
+check "a live lock in the branch's entry is a running sync" "$rc" "running=$running"
+fresh_data
+state=$( . "$ROOT/scripts/lib.sh"; pc_state_dir )
+rc=1
+[ "$state" = "$CLAUDE_PROJECT_DIR/.predictable-code" ] && rc=0
+check "pc_state_dir is .predictable-code itself outside a database" "$rc" "state=$state"
+
 echo "== concurrency guard =="
 
 fresh_data

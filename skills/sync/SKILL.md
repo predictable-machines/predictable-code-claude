@@ -164,7 +164,11 @@ render — the envelope file is still written; read it anyway. Then:
      `.requirements[]` (group by `status`/`origin`) — never by reading the viewer.
 
    **The COMPLETE model — everything the HTML viewer shows — lives in
-   `<project>/.predictable-code/specs/.data/*.json`** (written by the same
+   `<state>/specs/.data/*.json`**, where `<state>` is the checked-out branch's
+   state directory: `<project>/.predictable-code/<branch>/.predictable-code` in a
+   git checkout (`.predictable-code/` is the `predictable-code-database` branch,
+   checked out as a worktree, one entry per branch), `<project>/.predictable-code`
+   anywhere else. Written by the same
    generator, same run, so it can never disagree with the viewer). The envelope
    is a SUMMARY; whenever you need what the viewer knows — the
    finding↔requirement association, a requirement's DISPLAYED status, per-finding
@@ -181,7 +185,7 @@ render — the envelope file is still written; read it anyway. Then:
      points. Join envelope findings via `(fqn, vc)`; join requirements via
      `req-analysis.json`'s `subject`/`scenarioVc`.
    - `specs.json` — full spec docs with every row's persisted flags.
-   Never parse the HTML viewer or `.predictable-code/specs/locations/**` — the
+   Never parse the HTML viewer or `<state>/specs/locations/**` — the
    `.data/` files ARE the machine form of the viewer.
 
 **Run only ONE check at a time.** `predictable sync` is exclusive per project —
@@ -237,7 +241,7 @@ domain-only) in `/tmp/pc-sync-envelope.json`. Read them straight from that file;
 that is the SUMMARY report. Do **not** scrape `verification/.analysis-findings/`
 or `.analysis-results.json` when `.findings` is present — the envelope replaced
 that. For the full per-finding detail and the finding↔requirement association —
-what the HTML viewer shows — read `<project>/.predictable-code/specs/.data/*.json`
+what the HTML viewer shows — read `<state>/specs/.data/*.json`
 (see the envelope section above); join on `(fqn, vc)`.
 
 `severity: "error"` = reachable-now (`class: "affecting"`); `severity: "warning"` =

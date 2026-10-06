@@ -63,20 +63,13 @@ permission flow).
 
 ## Worktrees & surfaces
 
-**Git worktrees.** A new worktree is a fresh checkout from `origin/HEAD` — it does
-**not** carry uncommitted or untracked files, and `.predictable-code/` is gitignored
-so it is never copied over. That is fine: the `SessionStart` hook re-initializes and
-re-checks each worktree automatically. If you would rather a worktree **inherit** the
-existing config (and skip re-init), add a [`.worktreeinclude`](https://code.claude.com/docs/en/worktrees)
-to your repo root with:
-
-```text
-.predictable-code/project.json
-```
-
-Do **not** configure a `WorktreeCreate` hook for this — that hook *replaces* git
-worktree creation entirely and disables `.worktreeinclude`; it is meant for non-git
-VCS, not setup.
+**Git worktrees.** Everything Predictable keeps lives on one branch of your
+repository, `predictable-code-database`, which `predictable` checks out at
+`.predictable-code/` in each checkout (hidden from your code by
+`.git/info/exclude`). A new worktree shares the repository, so its first sync opens
+the same database — the configuration and every branch's analysis included — and an
+analysis of a state some branch already has is reused rather than recomputed.
+Nothing needs copying, and no `.worktreeinclude` or `WorktreeCreate` hook is needed.
 
 **Surfaces.** The plugin's command hooks + the `predictable` runtime need a local
 shell, so the loop runs in the **terminal CLI, the desktop app, and the IDE

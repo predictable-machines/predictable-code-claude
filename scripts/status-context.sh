@@ -25,7 +25,7 @@ rm -f "$stdin_json" 2>/dev/null || true
 # left over from a previous session is never announced as "finished" — only
 # syncs that complete DURING this session get the one-shot closing line below.
 announced_marker="$(pc_data_dir)/announced-sync-run"
-runtime_result="$(pc_project_dir)/.predictable-code/.last-sync-response.json"
+runtime_result="$(pc_state_dir)/.last-sync-response.json"
 if [ "$event" = "SessionStart" ] && [ "$src" = "startup" ]; then
   pc_reset_session_history
   rm -f "$(pc_last_verdict_file)" 2>/dev/null || true
@@ -51,10 +51,11 @@ elif ! pc_is_configured; then
 elif [ "$verdict" = "-" ]; then
   body="Predictable Code: $(pc_verdict_summary "$verdict") to check this project against its spec."
 else
-  body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: .predictable-code/specs/.data/findings.json. Re-run predictable sync after edits."
+  findings="$(pc_state_dir)/specs/.data/findings.json"
+  body="Predictable Code — current verdict: $(pc_verdict_summary "$verdict"). Findings: ${findings#"$(pc_project_dir)"/}. Re-run predictable sync after edits."
 fi
 
-# Live-check beacon: the product's project sync lock (`.predictable-code/.sync.lock`)
+# Live-check beacon: the product's project sync lock (`.sync.lock` in the state directory)
 # names the pid of the sync running RIGHT NOW — the only signal that exists the
 # moment a background check starts (the verdict file lands only at the end). The
 # injected line tells the agent to ATTACH a background `sync --json` shell to it:
@@ -63,7 +64,7 @@ fi
 # when the detached hook sync finishes — a hook cannot wake the agent, but the
 # agent's own background task can. A dead pid means a stale lock the product
 # clears itself, so only a live one is surfaced.
-lock_file="$(pc_project_dir)/.predictable-code/.sync.lock"
+lock_file="$(pc_state_dir)/.sync.lock"
 sync_live=0
 if [ -f "$lock_file" ] && pc_have_jq; then
   lock_pid="$(jq -r '.pid // 0' "$lock_file" 2>/dev/null || printf '0')"
