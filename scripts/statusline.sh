@@ -58,10 +58,12 @@ if [ -z "$segment" ] && [ -n "$project" ] && [ -f "$result" ]; then
     *) segment="" ;;
   esac
   # Age suffix so a ✓ is unambiguous ("finished, N min ago"), never confusable
-  # with a verdict left over from an older run. BSD stat first (macOS), GNU
-  # fallback; no age shown when neither works.
+  # with a verdict left over from an older run. No age shown when neither stat
+  # form works.
   if [ -n "$segment" ]; then
-    result_mtime=$(stat -f %m "$result" 2>/dev/null || stat -c %Y "$result" 2>/dev/null || printf '')
+    # GNU's form FIRST: GNU `stat -f` is not BSD's mtime flag but "filesystem status", which
+    # succeeds and prints a multi-line report into the number. BSD has no `-c`, so it fails over.
+    result_mtime=$(stat -c %Y "$result" 2>/dev/null || stat -f %m "$result" 2>/dev/null || printf '')
     now_epoch=$(date +%s 2>/dev/null || printf '')
     if [ -n "$result_mtime" ] && [ -n "$now_epoch" ]; then
       age=$((now_epoch - result_mtime))
