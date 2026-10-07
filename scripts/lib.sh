@@ -193,6 +193,35 @@ pc_state_dir() {
 }
 pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 
+# The runtime's project sync lock: in the checked-out branch's state directory, the
+# same place the CLI takes it (`<basePath>/.sync.lock`).
+pc_sync_lock_file() { printf '%s/.sync.lock' "$(pc_state_dir)"; }
+
+# The pid a lock record names, or nothing when the record cannot be read. The CLI
+# CREATES the lock file and only then writes its record into it, so a reader can meet
+# an empty or half-written file — a sync starting, not a lock nobody holds.
+pc_lock_pid() { # lock-file
+  jq -r 'if type == "object" and (.pid | type) == "number" then .pid else empty end' \
+    "$1" 2>/dev/null
+}
+
+# Seconds since a file last changed, or nothing when `stat` cannot say. GNU's spelling
+# goes first: BSD `stat` rejects `-c` outright, while GNU `stat` reads `-f %m` as "the
+# file-system status of a file named %m" and prints the real file's status as well,
+# which would land in the number.
+pc_file_age() { # file
+  _pc_mtime="$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null)"
+  case "$_pc_mtime" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  printf '%s' "$(($(date +%s) - _pc_mtime))"
+}
+
+# How long a lock that cannot be read still counts as a sync starting. The CLI gives a
+# writer two seconds before it reads such a lock as gone; a hook starts slower than the
+# CLI's own retry loop, so it allows longer before it calls one abandoned.
+pc_unreadable_lock_grace_seconds=10
+
 # True when another `predictable … sync` is already running anywhere on this box:
 # the skill's own foreground `predictable sync --json` and any sibling Stop/
 # SubagentStop hook both match. Callers skip launching a second one — two syncs on
@@ -209,13 +238,22 @@ pc_is_configured() { [ -f "$(pc_config_file)" ]; }
 # no session-start sync, no toast, no statusline wiring — until reboot.
 # Without jq, lock presence alone counts; a stale lock (dead pid) is cleared
 # by the runtime itself on its next acquire, so a false "running" self-heals.
+# A lock that cannot be read counts as running while it is young enough to be
+# mid-write (`pc_unreadable_lock_grace_seconds`): two hooks each starting a sync in
+# that instant is exactly the race the lock exists to stop. An age nobody can tell
+# counts as running, like a lock read without jq.
 pc_sync_running() {
-  _pc_lock="$(pc_state_dir)/.sync.lock"
+  _pc_lock="$(pc_sync_lock_file)"
   [ -f "$_pc_lock" ] || return 1
   pc_have_jq || return 0
-  _pc_lock_pid="$(jq -r '.pid // 0' "$_pc_lock" 2>/dev/null || printf '0')"
+  _pc_lock_pid="$(pc_lock_pid "$_pc_lock")"
   case "$_pc_lock_pid" in
-    '' | *[!0-9]*) _pc_lock_pid=0 ;;
+    '' | *[!0-9]*)
+      _pc_lock_age="$(pc_file_age "$_pc_lock")"
+      [ -z "$_pc_lock_age" ] && return 0
+      [ "$_pc_lock_age" -le "$pc_unreadable_lock_grace_seconds" ]
+      return $?
+      ;;
   esac
   [ "$_pc_lock_pid" -gt 0 ] && kill -0 "$_pc_lock_pid" 2>/dev/null
 }

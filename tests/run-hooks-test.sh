@@ -352,6 +352,63 @@ rc=1
 check "sync already running -> skip (no second sync, logs skipped-running)" "$rc" \
   "exit $CODE hist=$([ -f "$DATA/session-history.jsonl" ] && echo yes || echo no)"
 
+# In a database checkout the CLI takes its lock in the checked-out branch's entry, and
+# the HOOK must look there: a SessionStart sync and a Stop sync 3 s apart both ran in a
+# release test.
+fresh_data
+git -C "$CLAUDE_PROJECT_DIR" init -q -b main
+printf 'gitdir: /elsewhere\n' >"$CLAUDE_PROJECT_DIR/.predictable-code/.git"
+mkdir -p "$CLAUDE_PROJECT_DIR/.predictable-code/main/.predictable-code"
+printf '{"pid": %s, "runId": "l1-test", "inputsDigest": "x", "stage": "database"}' "$$" \
+  >"$CLAUDE_PROJECT_DIR/.predictable-code/main/.predictable-code/.sync.lock"
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -f "$DATA/session-history.jsonl" ] \
+  && grep -q 'skipped-running' "$DATA/hook-events.log" 2>/dev/null && rc=0
+check "a live lock in the branch's entry -> the turn-end hook starts no second sync" "$rc" \
+  "exit $CODE hist=$([ -f "$DATA/session-history.jsonl" ] && echo yes || echo no)"
+
+# The CLI creates the lock and then writes its record into it, so a hook can meet it empty
+# or half-written: that is a sync starting, and starting another beside it is the race.
+fresh_data
+: >"$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
+running=$( . "$ROOT/scripts/lib.sh"; pc_sync_running && echo yes || echo no )
+rc=1
+[ "$running" = "yes" ] && rc=0
+check "an empty lock file (being written) counts as running" "$rc" "running=$running"
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+rc=1
+[ ! -f "$DATA/session-history.jsonl" ] && grep -q 'skipped-running' "$DATA/hook-events.log" 2>/dev/null && rc=0
+check "an empty lock file -> the turn-end hook starts no second sync" "$rc"
+
+printf '{"pid": 12' >"$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
+running=$( . "$ROOT/scripts/lib.sh"; pc_sync_running && echo yes || echo no )
+rc=1
+[ "$running" = "yes" ] && rc=0
+check "a half-written lock record counts as running" "$rc" "running=$running"
+
+# ...but only briefly: an unreadable lock nobody has touched for minutes was abandoned,
+# and reading it as running for ever would stop every hook from syncing again.
+: >"$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
+touch -t 200001010000 "$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
+running=$( . "$ROOT/scripts/lib.sh"; pc_sync_running && echo yes || echo no )
+rc=1
+[ "$running" = "no" ] && rc=0
+check "an empty lock file left for long is not a running sync" "$rc" "running=$running"
+
+# A lock naming a pid that is gone is stale (the CLI clears it on its next acquire).
+sh -c 'exit 0' &
+dead_pid=$!
+wait "$dead_pid" 2>/dev/null
+printf '{"pid": %s, "runId": "gone", "inputsDigest": "x"}' "$dead_pid" \
+  >"$CLAUDE_PROJECT_DIR/.predictable-code/.sync.lock"
+running=$( . "$ROOT/scripts/lib.sh"; pc_sync_running && echo yes || echo no )
+rc=1
+[ "$running" = "no" ] && rc=0
+check "a lock naming a dead pid is not a running sync" "$rc" "running=$running pid=$dead_pid"
+
 echo "== status-context =="
 
 fresh_data

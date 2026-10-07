@@ -64,10 +64,10 @@ fi
 # when the detached hook sync finishes — a hook cannot wake the agent, but the
 # agent's own background task can. A dead pid means a stale lock the product
 # clears itself, so only a live one is surfaced.
-lock_file="$(pc_state_dir)/.sync.lock"
+lock_file="$(pc_sync_lock_file)"
 sync_live=0
 if [ -f "$lock_file" ] && pc_have_jq; then
-  lock_pid="$(jq -r '.pid // 0' "$lock_file" 2>/dev/null || printf '0')"
+  lock_pid="$(pc_lock_pid "$lock_file")"
   case "$lock_pid" in
     ''|*[!0-9]*) lock_pid=0 ;;
   esac
