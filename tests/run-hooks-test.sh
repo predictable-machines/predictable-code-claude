@@ -165,19 +165,44 @@ check "predictable specs requirements agent-verify -> auto-allow (records review
 echo "== progress formatter (#1237 NDJSON -> friendly lines) =="
 
 if command -v jq >/dev/null 2>&1; then
-  PROG_OUT=$(printf '%s\n' \
+  # shellcheck disable=SC2016  # the backticks are the CLI's literal text
+  PROG_IN=$(printf '%s\n' \
     '{"v":1,"event":"phase","phase":"translation","state":"start","files":42}' \
     'a schema-drift warning, not json' \
     '{"v":1,"event":"phase","phase":"analysis","state":"done","functions":30,"findings":7}' \
     '{"v":1,"event":"phase","phase":"inference","state":"done"}' \
-    | jq --unbuffered -jR -f "$ROOT/scripts/progress.jq" 2>/dev/null)
+    '{"v":1,"event":"phase","phase":"requirements","state":"done","checked":12,"verified":10,"violated":2}' \
+    '42' \
+    'Predictable Code: /r/.predictable-code is a `.predictable-code/` from before the database; run `predictable migrate`, then run this again.')
+  PROG_OUT=$(printf '%s\n' "$PROG_IN" | jq --unbuffered -jR -f "$ROOT/scripts/progress.jq" 2>"$ERRFILE")
+  PROG_CODE=$?
   rc=1
-  contains "$PROG_OUT" 'Reading your code' \
+  [ "$PROG_CODE" -eq 0 ] \
+    && contains "$PROG_OUT" 'Reading your code' \
     && contains "$PROG_OUT" 'Analyzed 30 function(s) — 7 potential issue(s)' \
     && contains "$PROG_OUT" 'Specification inferred' \
+    && contains "$PROG_OUT" '10 of 12 requirement(s) verified · 2 refuted' \
     && ! contains "$PROG_OUT" 'not json' \
     && rc=0
-  check "progress.jq maps phase events to domain lines, drops non-JSON" "$rc" "out=$PROG_OUT"
+  check "progress.jq maps phase events to domain lines, drops non-JSON" "$rc" "exit=$PROG_CODE out=$PROG_OUT"
+  # The CLI's refusal is the one plain line that must get through: it is the only thing
+  # a run that wrote no envelope says about why.
+  rc=1
+  contains "$PROG_OUT" '⚠️ Predictable Code: /r/.predictable-code is a' \
+    && contains "$PROG_OUT" 'predictable migrate' && rc=0
+  check "progress.jq lets the CLI's 'Predictable Code: …' refusal through" "$rc" "out=$PROG_OUT"
+  # SKILL.md carries this filter inline (the skill's shell cannot path to the file), and
+  # the two had already drifted apart: run the copy the agent actually executes.
+  SKILL_FILTER=$(awk '
+    /\| jq --unbuffered -jR '\''$/ { on = 1; next }
+    on && /'\''$/ { sub(/'\''$/, ""); print; exit }
+    on { print }
+  ' "$ROOT/skills/sync/SKILL.md")
+  SKILL_OUT=$(printf '%s\n' "$PROG_IN" | jq --unbuffered -jR "$SKILL_FILTER" 2>"$ERRFILE")
+  rc=1
+  [ -n "$SKILL_FILTER" ] && [ "$SKILL_OUT" = "$PROG_OUT" ] && rc=0
+  check "SKILL.md's inline progress filter does exactly what progress.jq does" "$rc" \
+    "skill=$SKILL_OUT"
 else
   check "progress.jq (skipped — jq not installed)" 0 ""
 fi

@@ -82,26 +82,28 @@ exact command:
 ```sh
 predictable sync --json --claude 2>&1 1>/tmp/pc-sync-envelope.json \
   | jq --unbuffered -jR '
-      fromjson? // empty
-      | select(.event == "phase")
-      | if .phase == "requirements"
-        then (if (.checked // 0) > 0
-              then "✓ \(.verified) of \(.checked) requirement(s) verified"
-                   + (if (.violated // 0) > 0 then " · \(.violated) refuted" else "" end) + "\n"
-              else empty end)
-        else ({ translation: { start: "🔄 Reading your code…\n" },
-                analysis:    { start: "🔎 Analyzing your code for issues…\n",
-                               done:  "✓ Analyzed \(.functions // "?") function(s) — \(.findings // 0) potential issue(s)\n",
-                               error: "⚠️ Analysis hit a snag — continuing…\n" },
-                inference:   { start: "🧪 Working out the specification…\n",
-                               done:  "✓ Specification inferred\n" } }[.phase][.state]) // empty
-        end'
+      (fromjson? // {said: .})
+      | (select(.said? | strings | startswith("Predictable Code: ")) | "⚠️ \(.said)\n"),
+        (select(.event? == "phase")
+         | if .phase == "requirements"
+           then (if (.checked // 0) > 0
+                 then "✓ \(.verified) of \(.checked) requirement(s) verified"
+                      + (if (.violated // 0) > 0 then " · \(.violated) refuted" else "" end) + "\n"
+                 else empty end)
+           else ({ translation: { start: "🔄 Reading your code…\n" },
+                   analysis:    { start: "🔎 Analyzing your code for issues…\n",
+                                  done:  "✓ Analyzed \(.functions // "?") function(s) — \(.findings // 0) potential issue(s)\n",
+                                  error: "⚠️ Analysis hit a snag — continuing…\n" },
+                   inference:   { start: "🧪 Working out the specification…\n",
+                                  done:  "✓ Specification inferred\n" } }[.phase][.state]) // empty
+           end)'
 ```
 
 How it works: Predictable emits one progress event per phase (as JSON lines on
 stderr); the `jq` filter turns each into a friendly line, so the background task's
 own output IS the live progress the user sees — no internals leak, and you never
-narrate it yourself. The `requirements` phase carries the **"N of M requirements
+narrate it yourself. The one plain line it lets through is Predictable's own
+`⚠️ Predictable Code: …`, which says why a check did not run. The `requirements` phase carries the **"N of M requirements
 verified"** milestone — the PROJECT total (verified of total checkable, plus the
 refuted count), not this run's delta, so it's meaningful on every check (even an
 incremental re-sync that re-checks nothing). A milestone, not a live counter.
@@ -119,7 +121,14 @@ render — the envelope file is still written; read it anyway. Then:
 3. On completion, read the envelope from **`/tmp/pc-sync-envelope.json`** — that
    file **is** the JSON envelope. Post `✅ Check complete`, then report per below.
    If the run failed (no envelope written), translate the problem to plain
-   language — never surface internal / build / engine text.
+   language — never surface internal / build / engine text. The exception is a
+   `⚠️ Predictable Code: …` line in the run's output: that is the reason, written for
+   the user by Predictable itself — relay it as it is and act on it. When it says to
+   run `predictable migrate` (a checkout whose `.predictable-code/` is from before
+   the database), run `predictable migrate --force`: your shell has no terminal, and
+   without `--force` it refuses to ask for a confirmation it cannot get. It makes one
+   local commit that stops tracking `.predictable-code/` and deletes nothing; tell the
+   user that commit needs pushing, then run the check again.
 4. **Link the report for the user, automatically.** The **Control Center** is
    hosted: it shows the findings and the requirements inferred per function for
    the analysis this sync published. Get this project's link with the Bash tool
