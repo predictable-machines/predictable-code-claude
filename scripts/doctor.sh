@@ -55,14 +55,14 @@ if [ -f "$manifest" ] && pc_have_jq; then
   if [ -f "$runtime_dir/lean-toolchain" ]; then ok "Lean toolchain marker present"; else bad "no lean-toolchain in bundle"; fi
   if [ -d "$runtime_dir/workspace/.lake" ]; then ok "prebuilt workspace .lake present"; else bad "no workspace/.lake in bundle (law types won't resolve)"; fi
 else
-  warn "no runtime bundle installed yet ($manifest) — run a SessionStart to bootstrap it (needs PREDICTABLE_DIST_TOKEN)"
+  warn "no runtime bundle installed ($manifest) — fine with a \`predictable\` on PATH; the bundle is fetched at SessionStart only with PREDICTABLE_DIST_TOKEN"
 fi
 
 # `predictable` is invokable through the wrapper (dry: --version).
 if "$wrapper" --version >/dev/null 2>&1; then
   ok "predictable is invokable through the wrapper"
 else
-  warn "predictable not invokable yet (no runtime bundle and no dev predictable on PATH)"
+  warn "predictable not invokable yet (no runtime bundle and no predictable on PATH — install it with the command under Settings › Connected machines in the Control Center)"
 fi
 
 printf '\n'

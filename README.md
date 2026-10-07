@@ -12,29 +12,92 @@ diagnose) and returns a single verdict. No other verbs, no MCP server, and
 **zero configuration**.
 
 > This repo contains **no Predictable source code** — only the plugin
-> (manifest, hooks, scripts, one skill). The compiled runtime is downloaded on
-> first run from a token-gated, artifacts-only distribution repository. The
-> Predictable source stays private.
+> (manifest, hooks, scripts, one skill). It runs the `predictable` CLI you
+> install (below), or a compiled runtime it downloads from a token-gated,
+> artifacts-only distribution repository. The Predictable source stays private.
 
 ## Install
 
+### 1. The `predictable` CLI
+
+Install it with the command the hosted Control Center shows under
+**Settings › Connected machines**:
+
 ```sh
-claude plugin marketplace add predictable-machines/predictable-code-claude
-claude plugin install predictable-code@predictable-machines
+curl -fsSLO https://<control-center>/i/<code>/predictable-install.sh && bash predictable-install.sh
 ```
 
-On first session the `SessionStart` hook downloads the per-platform runtime
-bundle (the `predictable` CLI + `predictable_java_direct` + pinned `z3` +
-relocatable Lean toolchain + prebuilt `.lake` oleans) into the plugin's data
-directory. This requires a distribution token:
+It installs Predictable Code and puts `predictable` on your `PATH` (open a new
+shell, and start Claude Code from it, so the session sees it). With no runtime
+bundle of its own, the plugin runs that `predictable` — `bin/predictable` falls
+back to the one on `PATH` — so nothing else is needed.
+
+**Alternative: the runtime bundle.** With a distribution token set, the
+`SessionStart` hook downloads the per-platform runtime bundle (the `predictable`
+CLI + `predictable_java_direct` + pinned `z3` + relocatable Lean toolchain +
+prebuilt `.lake` oleans) into the plugin's data directory on the first session,
+and uses it instead:
 
 ```sh
 export PREDICTABLE_DIST_TOKEN=<your-token>
 ```
 
 The token unlocks only the compiled runtime — it grants no access to any source.
-Without it, the plugin degrades gracefully (a `systemMessage`, never a broken
+With neither, the plugin degrades gracefully (a `systemMessage`, never a broken
 session).
+
+### 2. The plugin, in the repositories that should be analysed
+
+Add the marketplace once:
+
+```sh
+claude plugin marketplace add predictable-machines/predictable-code-claude
+```
+
+then, from the root of each repository that should be analysed:
+
+```sh
+claude plugin install predictable-code@predictable-machines --scope local
+```
+
+**Choose the scope.** `claude plugin install` defaults to **user** scope, which
+turns the plugin on in **every** repository you open with Claude Code — and its
+hooks initialise Predictable Code there, sync it, and **publish** each analysis
+(a push to origin's `predictable-code-database` branch). Install it per
+repository instead:
+
+| Scope | Recorded in | Who gets it |
+| :-- | :-- | :-- |
+| `--scope local` (recommended for yourself) | `.claude/settings.local.json`, not committed | you, in this repository |
+| `--scope project` (recommended for a team) | `.claude/settings.json`, committed | everyone who opens this repository with Claude Code |
+| `--scope user` (the default) | `~/.claude/settings.json` | you, in every repository |
+
+For `--scope project`, declare the marketplace in the repository too
+(`claude plugin marketplace add predictable-machines/predictable-code-claude --scope project`),
+so a teammate's Claude Code can find the plugin it names.
+
+Already installed at user scope? Remove it there
+(`claude plugin uninstall predictable-code@predictable-machines --scope user`)
+and install it with `--scope local` or `--scope project` in each repository that
+should be analysed.
+
+### A checkout from before the database
+
+A repository whose code branch still tracks `.predictable-code/` (set up by an
+earlier Predictable Code) is refused by `predictable sync` until it is migrated,
+once:
+
+```sh
+predictable migrate
+git push
+```
+
+`predictable migrate` makes one local commit that stops tracking
+`.predictable-code/` (nothing is deleted) and moves the configuration to the
+`predictable-code-database` branch; push that commit so every other checkout of
+the branch gets it. Until then the hooks say so (see
+[When a check does not run](#when-a-check-does-not-run)), and the agent is told
+to run it.
 
 ## What it does
 
@@ -44,15 +107,30 @@ session).
 | **Command** `/predictable-code:report` | Links this project in the hosted Control Center (findings + inferred requirements), or says why there is no link (not signed in, no GitHub `origin`). |
 | **`SessionStart`** | Ensures the runtime is installed **and the project is initialized** (headless), kicks off a first check **in the background**, and injects the last verdict as context. Self-configures fresh sessions and worktrees with no user action. |
 | **`UserPromptSubmit` / `PreCompact`** | Re-injects the last verdict so the agent always knows the sync state. |
-| **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks only on a broken requirement** (`specViolation`). Every other verdict is advisory (warn, don't block). |
+| **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks only on a broken requirement** (`specViolation`). Every other verdict is advisory (warn, don't block), and a sync that does not run never blocks — the gate says why. |
 | **`Stop` / `SubagentStop`** | Advisory turn-end `sync` (skipped if one is already running) so the agent keeps working toward an in-sync state. |
 
 Edits do **not** trigger a sync: the skill runs its own `predictable sync` after
 changing code, and two syncs on one project at once are never allowed — every hook
-skips when one is already in flight.
+skips when one is already in flight: when the runtime's sync lock (in the
+checked-out branch's entry of the database) names a live process, or is still
+being written.
 
 Everything is advisory except the **pre-push/commit gate**, and even that blocks
 only on a genuine `specViolation`.
+
+### When a check does not run
+
+A `predictable sync` that exits non-zero is never dropped. Every hook keeps the
+sync's stderr apart from its JSON envelope and takes the CLI's own reason from it
+— the last line that is not a progress event — for example a checkout from before
+the database, refused with one line naming `predictable migrate`:
+
+- the **pre-push/commit gate** allows the command (it blocks only on
+  `specViolation`) and says it was not checked, and why;
+- the **background** syncs (`SessionStart`, `Stop`) record the reason; the next
+  turn end tells the **user** once per session, and every prompt tells the
+  **agent**, with what to do about it, until a sync runs.
 
 The `PreToolUse` hook also **auto-approves the plugin's own commands** — running
 `predictable sync`, linking the Control Center (`scripts/control-center-url.sh`), and

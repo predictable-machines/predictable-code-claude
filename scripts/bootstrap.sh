@@ -73,7 +73,7 @@ if [ -z "$token" ]; then
     pc_log SessionStart bootstrap dev-path
     exit 0
   fi
-  fail_advisory "Predictable Code: no runtime bundle and no \`predictable\` on PATH. Set PREDICTABLE_DIST_TOKEN to fetch the runtime, or install \`predictable\`. (No source is ever downloaded; the token only unlocks the compiled runtime.)"
+  fail_advisory "Predictable Code: \`predictable\` is not installed — install it with the command under Settings › Connected machines in the Control Center (or set PREDICTABLE_DIST_TOKEN to fetch the runtime bundle)."
 fi
 
 for tool in curl tar; do

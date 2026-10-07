@@ -38,7 +38,7 @@ if [ -n "$fallback" ]; then
   exec "$fallback" "$@"
 fi
 
-printf 'predictable: no runtime bundle in %s and no predictable on PATH.\n' "$runtime" >&2
-printf 'Start a session so the SessionStart hook can install the runtime (needs PREDICTABLE_DIST_TOKEN),\n' >&2
-printf 'or put a dev predictable on PATH.\n' >&2
+# One line: the hooks quote the last line of a failed sync's stderr, so the whole
+# reason has to fit in it.
+printf 'predictable: no runtime bundle in %s and no predictable on PATH; install it with the command under Settings > Connected machines in the Control Center, or set PREDICTABLE_DIST_TOKEN and start a session to fetch the runtime bundle.\n' "$runtime" >&2
 exit 127
