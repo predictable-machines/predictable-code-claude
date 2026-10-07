@@ -100,16 +100,29 @@ notify_sync_done() { # verdict-file
 # Fire the first sync DETACHED; SessionStart returns now, the verdict lands next
 # turn. `--claude` auto-inits the project if needed (product-side). PREDICTABLE_SYNC_
 # FOREGROUND=1 runs it synchronously (L1 tests / debugging).
+#
+# This hook has returned long before a detached sync can fail, so a sync that does
+# not run is RECORDED with the reason its stderr gave (a checkout from before the
+# database is refused with one line naming `predictable migrate`), and the next
+# status-context or Stop hook says it: to the agent as context, to the user once.
 verdict_file="$(pc_last_verdict_file)"
 run_first_sync() {
   tmp="$verdict_file.tmp.$$"
-  if ( cd "$project" 2>/dev/null && "$bin" sync --json --claude ) >"$tmp" 2>/dev/null; then
+  err="$(pc_stderr_file)"
+  pc_run_sync "$tmp" "$err"
+  code=$?
+  if [ "$code" -eq 0 ]; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     pc_record_sync SessionStart "$verdict_file"
+    pc_clear_sync_failure
     notify_sync_done "$verdict_file"
   else
     rm -f "$tmp" 2>/dev/null || true
+    pc_record_sync_failure SessionStart "$code" \
+      "$(pc_sync_failure_text "$code" "$(pc_sync_failure_reason "$err")")" no
+    pc_log SessionStart session-sync "failed-$code"
   fi
+  rm -f "$err" 2>/dev/null || true
 }
 
 if pc_sync_running; then

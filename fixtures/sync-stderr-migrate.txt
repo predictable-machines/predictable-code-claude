@@ -1,0 +1,3 @@
+{"v":1,"event":"phase","phase":"translation","state":"start","files":3}
+Predictable Code: /tmp/l1-project/.predictable-code is a `.predictable-code/` from before the database; run `predictable migrate` (one local commit that stops tracking it; nothing is deleted), then run this again.
+{"v":1,"event":"phase","phase":"translation","state":"error"}

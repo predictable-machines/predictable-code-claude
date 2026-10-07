@@ -450,3 +450,157 @@ pc_session_summary() {
     end
   ' "$_pc_hist" 2>/dev/null || printf ''
 }
+
+# --- When `predictable sync` does not run -------------------------------------
+#
+# A sync that exits non-zero used to vanish: every hook sent its stderr to /dev/null,
+# and the gate read any non-zero exit as "runtime unavailable". The CLI refuses some
+# checkouts outright — one whose `.predictable-code/` is from before the database gets
+# exit 1, nothing on stdout and ONE line on stderr saying to run `predictable migrate` —
+# so a refused checkout was never checked again and nobody was told why. Every hook now
+# keeps stderr apart from the envelope and, on a non-zero exit, says that line.
+
+# Run the check in the project: the envelope to $1, stderr to $2. Kept apart because
+# under `--json` stderr also carries the NDJSON progress stream, and one stream mixed
+# into the other would corrupt the envelope a later hook parses.
+pc_run_sync() { # envelope-file stderr-file
+  (cd "$(pc_project_dir)" 2>/dev/null && "$(pc_predictable_bin)" sync --json --claude) >"$1" 2>"$2"
+}
+
+# A scratch file for one sync's stderr. mktemp, falling back to the data dir rather
+# than failing, so a host without mktemp still gets told why its sync did not run.
+pc_stderr_file() {
+  mktemp 2>/dev/null || {
+    mkdir -p "$(pc_data_dir)" 2>/dev/null || true
+    printf '%s/sync-stderr.%s' "$(pc_data_dir)" "$$"
+  }
+}
+
+# Why a sync that exited non-zero did not run, read from its stderr: the LAST line that
+# is neither blank nor a progress event. Under `--json` every progress event is a `{…}`
+# line and a refusal is one plain sentence, so the JSON lines are skipped rather than
+# quoted. The CLI's own "Predictable Code: " prefix is dropped (the hooks say their own),
+# colour escapes are removed, and a runaway line is cut so it cannot flood the context.
+# Empty when stderr said nothing usable.
+pc_sync_failure_reason() { # stderr-file
+  [ -s "$1" ] || return 0
+  _pc_esc="$(printf '\033')"
+  tr -d '\r' <"$1" |
+    sed -e "s/${_pc_esc}\[[0-9;]*[A-Za-z]//g" |
+    grep -v -e '^[[:space:]]*{' -e '^[[:space:]]*$' |
+    tail -n 1 |
+    sed -e 's/^[[:space:]]*//' -e 's/^Predictable Code:[[:space:]]*//' |
+    cut -c 1-600
+}
+
+# The sentence that says why a sync did not run, ending in a full stop. Exit 127 is the
+# wrapper's "no runtime and no `predictable` on PATH" (bin/predictable), which has a
+# remedy of its own; anything else is the CLI's own words, quoted.
+pc_sync_failure_text() { # exit-code reason
+  case "$1" in
+    127) _pc_text="the runtime is not available (no runtime bundle and no \`predictable\` on PATH)" ;;
+    *)
+      if [ -n "$2" ]; then
+        _pc_text="$2"
+      else
+        _pc_text="\`predictable sync\` exited $1 without saying why"
+      fi
+      ;;
+  esac
+  case "$_pc_text" in
+    *. | *'!' | *'?') printf '%s' "$_pc_text" ;;
+    *) printf '%s.' "$_pc_text" ;;
+  esac
+}
+
+# Where the standing failure of this project's last sync is recorded. One file PER
+# PROJECT, because the data dir is the plugin's and every repository shares it: a
+# refusal in one repository must neither be reported in another nor cleared by a sync
+# that succeeded there.
+pc_sync_failure_file() {
+  _pc_key="$(printf '%s' "$(pc_project_dir)" | cksum | awk '{print $1}')"
+  printf '%s/sync-failure-%s.json' "$(pc_data_dir)" "$_pc_key"
+}
+
+# Record that this project's sync did not run, for the hooks after it to say: the
+# SessionStart and turn-end syncs are detached, so the hook that started one returned
+# long before it failed. `toldIn` is the session the USER was last told in — the same
+# refusal at every turn end is one thing to say per session, not one per turn — and it
+# is kept only while the text is the same, so a different failure is said again. Exit
+# 127 is not recorded: no runtime is bootstrap's to advise (once, at SessionStart), and
+# on a surface with no local runtime the plugin stays quiet rather than nag every turn.
+pc_record_sync_failure() { # event exit-code text told-now(yes|no)
+  [ "$2" = "127" ] && return 0
+  pc_have_jq || return 0
+  _pc_ff="$(pc_sync_failure_file)"
+  mkdir -p "$(pc_data_dir)" 2>/dev/null || true
+  _pc_told_in="null"
+  if [ "$4" = "yes" ]; then
+    _pc_told_in="$(jq -n --arg s "${PREDICTABLE_SESSION_ID:-}" '$s')"
+  elif [ -f "$_pc_ff" ]; then
+    _pc_told_in="$(jq -c --arg t "$3" 'if .text == $t then (.toldIn // null) else null end' "$_pc_ff" 2>/dev/null)"
+    [ -n "$_pc_told_in" ] || _pc_told_in="null"
+  fi
+  case "$2" in
+    '' | *[!0-9]*) _pc_exit=1 ;;
+    *) _pc_exit="$2" ;;
+  esac
+  if jq -n --arg ts "$(pc_now)" --arg ev "$1" --arg p "$(pc_project_dir)" \
+    --argjson x "$_pc_exit" --arg t "$3" --argjson told "$_pc_told_in" \
+    '{ts: $ts, event: $ev, project: $p, exit: $x, text: $t, toldIn: $told}' \
+    >"$_pc_ff.tmp.$$" 2>/dev/null; then
+    mv "$_pc_ff.tmp.$$" "$_pc_ff" 2>/dev/null || true
+  fi
+  rm -f "$_pc_ff.tmp.$$" 2>/dev/null || true
+}
+
+# A sync that ran supersedes whatever failure stood before it.
+pc_clear_sync_failure() { rm -f "$(pc_sync_failure_file)" 2>/dev/null || true; }
+
+# The standing failure's text, or nothing when the last sync ran.
+pc_sync_failure_standing() {
+  _pc_ff="$(pc_sync_failure_file)"
+  { [ -f "$_pc_ff" ] && pc_have_jq; } || return 0
+  jq -r '.text // empty' "$_pc_ff" 2>/dev/null
+}
+
+# The standing failure's text when the user has not been told it in this session yet,
+# marking it told; nothing otherwise. Marked only while the record still holds the same
+# text, so a newer failure written in between is not marked as said.
+pc_sync_failure_untold() {
+  _pc_ff="$(pc_sync_failure_file)"
+  { [ -f "$_pc_ff" ] && pc_have_jq; } || return 0
+  _pc_session="${PREDICTABLE_SESSION_ID:-}"
+  _pc_text="$(jq -r --arg s "$_pc_session" 'select(.toldIn != $s) | .text // empty' "$_pc_ff" 2>/dev/null)"
+  [ -n "$_pc_text" ] || return 0
+  if jq --arg s "$_pc_session" --arg t "$_pc_text" 'if .text == $t then .toldIn = $s else . end' \
+    "$_pc_ff" >"$_pc_ff.tmp.$$" 2>/dev/null; then
+    mv "$_pc_ff.tmp.$$" "$_pc_ff" 2>/dev/null || true
+  fi
+  rm -f "$_pc_ff.tmp.$$" 2>/dev/null || true
+  printf '%s' "$_pc_text"
+}
+
+# The one line the user sees when a sync did not run.
+pc_sync_failure_notice() { # text
+  printf 'Predictable Code: the check did not run — %s' "$1"
+}
+
+# What the agent is told while a sync cannot run, every turn until one runs: the
+# verdict it is otherwise shown would be the last one that DID run, read as current.
+# The CLI's sentence names the remedy. For `predictable migrate` the agent also needs
+# the two things the sentence cannot know about its shell: stdin is not a terminal
+# there, so without `--force` migrate refuses for want of one to confirm in; and the
+# commit it makes is local, for the user to push.
+pc_sync_failure_context() { # text
+  _pc_ctx="Predictable Code could not check this project: the last \`predictable sync\` did not run — $1 Nothing is checked until this is resolved, so any verdict you were shown is from an earlier check."
+  case "$1" in
+    *"predictable migrate"*)
+      _pc_ctx="$_pc_ctx Act on it: run \`predictable migrate --force\` in this repository (your shell has no terminal, and without \`--force\` it refuses to ask for a confirmation it cannot get). It makes one local commit that stops tracking \`.predictable-code/\` and deletes nothing; tell the user that commit needs pushing, then run the check again."
+      ;;
+    *)
+      _pc_ctx="$_pc_ctx If it names a command to run, run it in this repository and then run the check again; otherwise tell the user what it says."
+      ;;
+  esac
+  printf '%s' "$_pc_ctx"
+}

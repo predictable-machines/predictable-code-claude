@@ -4,7 +4,8 @@
 # Read-only context injector (SessionStart, UserPromptSubmit, PreCompact). Never
 # runs `sync` — it only reads the last persisted verdict and surfaces it as
 # additionalContext so the agent always knows whether the project is in sync.
-# Reading JSON off disk is not a command, so this is portable and cheap.
+# Reading JSON off disk is not a command, so this is portable and cheap. When the
+# last sync did NOT run, that is said instead of a verdict it would make look current.
 
 self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 # shellcheck source=scripts/lib.sh
@@ -12,6 +13,8 @@ self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 
 stdin_json=$(mktemp 2>/dev/null || echo "/tmp/pc-status.$$")
 cat >"$stdin_json"
+# The session is what "told the user once" is counted in (pc_sync_failure_untold).
+pc_export_session "$stdin_json"
 event="$(pc_read_event "$stdin_json")"
 [ "$event" = "-" ] && event="UserPromptSubmit"
 src="$(jq -r '.source // ""' "$stdin_json" 2>/dev/null || echo "")"
@@ -97,13 +100,35 @@ if pc_have_jq && [ -f "$runtime_result" ] && [ "$sync_live" -eq 0 ]; then
   fi
 fi
 
+# A sync that did not run (refused, or failed) comes first, for as long as it stands —
+# the agent is told on every turn, like the verdict it would otherwise read as current,
+# and the user once per session. A sync live right now has got past the point where
+# the CLI refuses a checkout, so the standing failure is likely resolved and is not
+# repeated over the beacon; the sync's own outcome replaces or clears it.
+notice=""
+if [ "$sync_live" -eq 0 ]; then
+  failure="$(pc_sync_failure_standing)"
+  if [ -n "$failure" ]; then
+    body="$(pc_sync_failure_context "$failure")
+
+$body"
+    untold="$(pc_sync_failure_untold)"
+    [ -n "$untold" ] && notice="$(pc_sync_failure_notice "$untold")"
+  fi
+fi
+message="$notice"
+if [ -n "$announce" ]; then
+  message="${message:+$message
+}$announce"
+fi
+
 # The brand + AskUserQuestion rules ride on every turn's context so they apply
 # session-wide, not only inside the sync skill.
 context_text="$(pc_brand_style_rule)
 $(pc_askquestion_rule)
 $body"
-if [ -n "$announce" ] && pc_have_jq; then
-  jq -n --arg e "$event" --arg c "$context_text" --arg m "$announce" \
+if [ -n "$message" ] && pc_have_jq; then
+  jq -n --arg e "$event" --arg c "$context_text" --arg m "$message" \
     '{systemMessage: $m, hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
 else
   pc_emit_context "$event" "$context_text"

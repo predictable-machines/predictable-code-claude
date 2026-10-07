@@ -19,7 +19,7 @@ fresh_data() {
   # it returns, so a stub knob set by one test silently governed every later one
   # — a `STUB_FAIL=1` four tests up turned a deny case into an infra-error
   # allow, and the test read as a broken gate rather than a leaked variable.
-  unset STUB_FAIL STUB_VERDICT STUB_SESSION_OUT PREDICTABLE_SESSION_ID
+  unset STUB_FAIL STUB_VERDICT STUB_SESSION_OUT STUB_STDERR STUB_EXIT PREDICTABLE_SESSION_ID
   DATA=$(mktemp -d)
   export CLAUDE_PLUGIN_DATA="$DATA"
   PROJ=$(mktemp -d)
@@ -434,6 +434,138 @@ contains "<$GOT_SESSION>" "<fixture-session>"
 check "a turn-end sync carries the hook's session_id as PREDICTABLE_SESSION_ID" $? "got=$GOT_SESSION"
 rm -f "$SESSION_OUT"
 unset STUB_SESSION_OUT
+
+echo "== a sync that does not run is said, never dropped =="
+
+# The CLI refuses a checkout whose `.predictable-code/` is from before the database: exit 1,
+# nothing on stdout, ONE line on stderr naming `predictable migrate`. Every hook threw stderr
+# away and read the exit as "runtime unavailable", so the refusal reached nobody.
+MIGRATE="$ROOT/fixtures/sync-stderr-migrate.txt"
+# The backticks are the CLI's literal text, not a command substitution.
+# shellcheck disable=SC2016
+SENTENCE='from before the database; run `predictable migrate`'
+json_ok() { printf '%s' "$1" | jq -e . >/dev/null 2>&1; }
+message_of() { printf '%s' "$1" | jq -r '.systemMessage // empty' 2>/dev/null; }
+context_of() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
+
+# The reason is the last stderr line that is not a progress event, without the CLI's prefix.
+reason=$( . "$ROOT/scripts/lib.sh"; pc_sync_failure_reason "$MIGRATE" )
+rc=1
+# shellcheck disable=SC2016  # literal backticks, as the CLI writes them
+case "$reason" in
+  '/tmp/l1-project/.predictable-code is a `.predictable-code/` from before the database;'*'then run this again.') rc=0 ;;
+esac
+check "the reason is the refusal sentence, not the NDJSON line after it" "$rc" "reason=$reason"
+
+# Turn end (detached in a session; foreground here): the user is told, in the CLI's words.
+fresh_data
+STUB_STDERR="$MIGRATE" STUB_EXIT=1 PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+msg=$(message_of "$OUT")
+rc=1
+[ "$CODE" -eq 0 ] && json_ok "$OUT" && contains "$msg" "$SENTENCE" \
+  && contains "$msg" 'the check did not run' && ! contains "$OUT" '"event"' && rc=0
+check "Stop + a refused sync -> the migrate sentence reaches the systemMessage" "$rc" "exit $CODE out=$OUT"
+rc=1
+[ ! -f "$DATA/last-verdict.json" ] && [ ! -f "$DATA/session-history.jsonl" ] \
+  && grep -q 'failed-1' "$DATA/hook-events.log" 2>/dev/null && rc=0
+check "a refused sync writes no verdict and no history, and is logged failed-1" "$rc"
+
+# Said to the user ONCE per session: the same refusal at every turn end is one thing to say.
+STUB_STDERR="$MIGRATE" STUB_EXIT=1 PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$OUT" "$SENTENCE" && rc=0
+check "the same refusal at the next turn end is not said to the user again" "$rc" "out=$OUT"
+
+# ...but the AGENT is told at every prompt while it stands, with what to do about it.
+run_hook status-context.sh user-prompt-submit.json
+ctx=$(context_of "$OUT")
+rc=1
+json_ok "$OUT" && contains "$ctx" "$SENTENCE" && contains "$ctx" 'predictable migrate --force' \
+  && [ -z "$(message_of "$OUT")" ] && rc=0
+check "next prompt -> the agent's context carries the refusal and the migrate step (user not re-told)" "$rc" "out=$OUT"
+
+# A sync that runs clears it.
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+! contains "$OUT" 'did not run' && rc=0
+check "a sync that runs clears the standing refusal" "$rc" "out=$OUT"
+
+# The detached SessionStart sync: its hook has returned by the time it fails, so the outcome
+# is recorded and the next status-context says it — to the user once, to the agent each turn.
+fresh_data
+git -C "$CLAUDE_PROJECT_DIR" init -q 2>/dev/null || true
+STUB_STDERR="$MIGRATE" STUB_EXIT=1 PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook session-sync.sh session-start.json
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -f "$DATA/last-verdict.json" ] && rc=0
+check "SessionStart + a refused sync -> exit 0, no verdict" "$rc" "exit $CODE"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+contains "$(message_of "$OUT")" "$SENTENCE" && contains "$(context_of "$OUT")" "$SENTENCE" && rc=0
+check "the SessionStart refusal reaches the next prompt: user AND agent" "$rc" "out=$OUT"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+[ -z "$(message_of "$OUT")" ] && contains "$(context_of "$OUT")" "$SENTENCE" && rc=0
+check "the prompt after: the agent still told, the user not again" "$rc" "out=$OUT"
+# A new session tells the user again: the reader may not be the one who saw it.
+other_session=$(mktemp)
+jq '.session_id = "another-session"' "$ROOT/fixtures/user-prompt-submit.json" >"$other_session"
+OUT=$(CLAUDE_PLUGIN_ROOT="$ROOT" PREDICTABLE_BIN="$STUB" \
+  "$ROOT/scripts/status-context.sh" <"$other_session" 2>"$ERRFILE")
+rm -f "$other_session"
+contains "$(message_of "$OUT")" "$SENTENCE"
+check "a new session tells the user once more" $? "out=$OUT"
+
+# The gate: a refusal never blocks (only specViolation does), and it is said.
+fresh_data
+STUB_STDERR="$MIGRATE" STUB_EXIT=1 run_hook sync-gate.sh pre-tool-use-git-push.json
+msg=$(message_of "$OUT")
+rc=1
+[ "$CODE" -eq 0 ] && json_ok "$OUT" && ! contains "$OUT" 'deny' \
+  && contains "$msg" "$SENTENCE" && contains "$msg" 'not checked' && rc=0
+check "git push + a refused sync -> allowed, and the systemMessage quotes the refusal" "$rc" "exit $CODE out=$OUT"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+contains "$(context_of "$OUT")" "$SENTENCE" && [ -z "$(message_of "$OUT")" ] && rc=0
+check "after the gate said it, the agent is told at the next prompt (the user is not re-told)" "$rc" "out=$OUT"
+
+# Progress events alone are no reason: a JSON line is never quoted as one.
+fresh_data
+STUB_STDERR="$ROOT/fixtures/sync-stderr-progress-only.txt" STUB_EXIT=1 \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+msg=$(message_of "$OUT")
+rc=1
+[ "$CODE" -eq 0 ] && contains "$msg" 'exited 1 without saying why' && ! contains "$msg" 'phase' && rc=0
+check "stderr with only NDJSON progress -> no JSON quoted as the reason" "$rc" "out=$OUT"
+
+# No runtime at all (the wrapper's 127) keeps its own wording and is bootstrap's to advise:
+# not recorded, so the agent is not told about it at every prompt.
+fresh_data
+STUB_EXIT=127 run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+[ "$CODE" -eq 0 ] && contains "$(message_of "$OUT")" 'runtime is not available' && rc=0
+check "git push + no runtime (127) -> allowed, says the runtime is not available" "$rc" "out=$OUT"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+! contains "$OUT" 'did not run' && rc=0
+check "no runtime (127) is not recorded as a standing failure" "$rc" "out=$OUT"
+
+# One repository's refusal is not another's: the plugin's data dir is shared by all of them.
+fresh_data
+STUB_STDERR="$MIGRATE" STUB_EXIT=1 PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+CLAUDE_PROJECT_DIR=$(mktemp -d)
+mkdir -p "$CLAUDE_PROJECT_DIR/.predictable-code"
+printf '{}' >"$CLAUDE_PROJECT_DIR/.predictable-code/project.json"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+! contains "$OUT" 'did not run' && rc=0
+check "a refusal in one repository is not reported in another" "$rc" "out=$OUT"
+export CLAUDE_PROJECT_DIR="$PROJ"
 
 echo "== bootstrap =="
 

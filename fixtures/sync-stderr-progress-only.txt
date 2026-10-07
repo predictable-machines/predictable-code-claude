@@ -1,0 +1,2 @@
+{"v":1,"event":"phase","phase":"translation","state":"start","files":3}
+{"v":1,"event":"phase","phase":"analysis","state":"error"}

@@ -44,8 +44,6 @@ emit_advisory() { # message
 matcher="$(jq -r '.tool_name // .toolName // "-"' "$stdin_json" 2>/dev/null || echo "-")"
 [ "$matcher" = "-" ] && matcher="$event"
 
-project="$(pc_project_dir)"
-bin="$(pc_predictable_bin)"
 verdict_file="$(pc_last_verdict_file)"
 
 run_sync() { # event
@@ -53,15 +51,25 @@ run_sync() { # event
   # the project with Claude defaults if it isn't set up — product-side, so this hook
   # never checks config). Persist it atomically so a partial write never corrupts the
   # verdict a later hook reads, then record the outcome in the session history that
-  # feeds the "issues found vs fixed" metric. A failed run (no runtime) leaves no
-  # verdict and never traps the turn.
+  # feeds the "issues found vs fixed" metric. A run that did not happen leaves the
+  # verdict alone and never traps the turn, but it is RECORDED with the reason its
+  # stderr gave: this sync is usually detached, so the hooks after it are the ones
+  # that can say it (the next Stop to the user, the next prompt to the agent).
   tmp="$verdict_file.tmp.$$"
-  if ( cd "$project" 2>/dev/null && "$bin" sync --json --claude ) >"$tmp" 2>/dev/null; then
+  err="$(pc_stderr_file)"
+  pc_run_sync "$tmp" "$err"
+  code=$?
+  if [ "$code" -eq 0 ]; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     pc_record_sync "$1" "$verdict_file"
+    pc_clear_sync_failure
   else
     rm -f "$tmp" 2>/dev/null || true
+    pc_record_sync_failure "$1" "$code" \
+      "$(pc_sync_failure_text "$code" "$(pc_sync_failure_reason "$err")")" no
+    pc_log "$1" sync-run "failed-$code"
   fi
+  rm -f "$err" 2>/dev/null || true
 }
 
 launch_sync() {
@@ -84,12 +92,32 @@ else
   pc_log "$event" "$matcher" "$(pc_verdict_name "$verdict_file")"
 fi
 
+# A sync that did not run, said first. On Stop the advisory is the user's
+# (systemMessage), so it is said once per session per distinct failure rather than at
+# every turn end; on an event whose advisory is the agent's context it stands every
+# time, like the verdict it replaces.
+case "$event" in
+  Stop | SubagentStop)
+    failure="$(pc_sync_failure_untold)"
+    [ -n "$failure" ] && failure="$(pc_sync_failure_notice "$failure")"
+    ;;
+  *)
+    failure="$(pc_sync_failure_standing)"
+    [ -n "$failure" ] && failure="$(pc_sync_failure_context "$failure")"
+    ;;
+esac
+
 # Surface the session progress — how many issues Predictable found and how many
 # Claude has fixed — as context (advisory; never blocks the turn). On Stop this
 # reads as the closing "proven in sync" summary once the code lands in sync.
 summary="$(pc_session_summary)"
+advisory="$failure"
 if [ -n "$summary" ]; then
-  emit_advisory "$summary"
+  advisory="${advisory:+$advisory
+}$summary"
+fi
+if [ -n "$advisory" ]; then
+  emit_advisory "$advisory"
 fi
 
 rm -f "$stdin_json" 2>/dev/null || true

@@ -4,7 +4,10 @@
 # Test stub for the `predictable` CLI. Lets the L1 hook-contract tests exercise
 # the scripts with no runtime bundle and no LLM: `sync --json` prints the
 # SyncResponse fixture named by $STUB_VERDICT (default: inSync). $STUB_FAIL=1
-# makes it exit non-zero to drive the gate's infra-error path.
+# makes it exit non-zero to drive the gate's infra-error path. $STUB_STDERR names a
+# file written to stderr as the real CLI writes its progress stream and refusals, and
+# $STUB_EXIT then exits with that code and NOTHING on stdout — how the CLI refuses a
+# checkout (exit 1, one line on stderr).
 
 case "$1" in
   --version)
@@ -21,6 +24,13 @@ fi
 if [ "${STUB_FAIL:-}" = "1" ]; then
   echo "stub: simulated sync failure" >&2
   exit 1
+fi
+
+if [ -n "${STUB_STDERR:-}" ] && [ -f "$STUB_STDERR" ]; then
+  cat "$STUB_STDERR" >&2
+fi
+if [ -n "${STUB_EXIT:-}" ]; then
+  exit "$STUB_EXIT"
 fi
 
 if [ -n "${STUB_VERDICT:-}" ] && [ -f "$STUB_VERDICT" ]; then
