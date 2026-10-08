@@ -162,14 +162,20 @@ render — the envelope file is still written; read it anyway. Then:
      present. `fqn` + `vc` are JOIN KEYS into the machine viewer data (below).
    - **requirements** = `.requirements[]` — every requirement across the project's
      specs as `{specId, reqId, subject, status ("verified"/"violated"/
-     "agent-verified"/"unchecked"), origin ("authored"/"analysis"/"inferred"),
+     "agent-verified"/"informal"), origin ("authored"/"analysis"/"inferred"),
      description}`. This is the per-requirement status breakdown AND the source of
      the `<spec-id> <req-id>` for `agent-verify`.
-     Note on `unchecked`: a large count is **normal** — most are `origin ==
+     Note on `informal`: an `informal` requirement binds no obligation the
+     analysis can decide — it is **stated, not checked**. It does **not** mean
+     something is wrong, and a large count is **normal**: most are `origin ==
      "inferred"` (CPG behavioural contract the code already satisfies:
-     documentation, exempt from mechanical checking by design), not failures. Only
+     documentation, exempt from mechanical checking by design). Only
      `origin == "analysis"`/`"authored"` rows are verification obligations that end
-     up `verified`/`violated`. When a user asks about the breakdown, answer from
+     up `verified`/`violated`; one of those still `informal` is one the analysis
+     could not decide either way. Never report an `informal` row as a failure,
+     a bug or an issue — issues come from `.findings[]` and `violated` rows. To
+     the user, say it plainly: "written down, but not something the automatic
+     check tests". When a user asks about the breakdown, answer from
      `.requirements[]` (group by `status`/`origin`) — never by reading the viewer.
 
    **The COMPLETE model — everything the HTML viewer shows — lives in
@@ -390,17 +396,18 @@ After every fix, re-check and act on each requirement's **real status**:
      - the **`ANL-####`** analysis row that *carries the finding* (the machine
        obligation, e.g. *"… requires that `opaque_…` is not null"*) — **mandatory**,
        never skip it in favour of its twin; and
-     - any **`unchecked` / informal** prose requirement for the SAME function that
+     - any **`informal`** prose requirement for the SAME function that
        states the same concern (e.g. *"… can fail with 'list index out of bounds'"*).
-       Predictable can't decide these either, so a reviewed one is a valid target —
-       verify it too, so the function reads coherently instead of showing one row
-       agent-reviewed and its twin still unchecked.
+       An `informal` requirement is stated, not checked — Predictable can't decide
+       it either — so a reviewed one is a valid target: verify it too, so the
+       function reads coherently instead of showing one row agent-reviewed and its
+       twin still `informal`.
 
      Match on the finding's function via `.requirements[]` — the finding's function
      and each requirement's `subject` share the same `Class.member` key. The
      `agent-verify` candidates are the envelope's `.requirements[]` entries with
-     `origin == "analysis"` (or an `unchecked` authored/informal prose row for the
-     same `subject`) and `status == "unchecked"`. Do **not** agent-verify a
+     `origin == "analysis"` (or an authored prose row for the same `subject`) and
+     `status == "informal"`. Do **not** agent-verify a
      requirement about a DIFFERENT concern you did not address, one that is merely
      unimplemented/pending (the code doesn't do it yet), a refuted (`status ==
      "violated"`) one (fix the code instead), a CPG `origin == "inferred"` row
