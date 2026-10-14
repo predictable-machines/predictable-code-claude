@@ -19,7 +19,8 @@ fresh_data() {
   # it returns, so a stub knob set by one test silently governed every later one
   # — a `STUB_FAIL=1` four tests up turned a deny case into an infra-error
   # allow, and the test read as a broken gate rather than a leaked variable.
-  unset STUB_FAIL STUB_VERDICT STUB_SESSION_OUT STUB_STDERR STUB_EXIT PREDICTABLE_SESSION_ID
+  unset STUB_FAIL STUB_VERDICT STUB_SESSION_OUT STUB_STDERR STUB_EXIT PREDICTABLE_SESSION_ID \
+    STUB_FIXCHECK PREDICTABLE_FIX_TARGET PREDICTABLE_FIX_PATH
   DATA=$(mktemp -d)
   export CLAUDE_PLUGIN_DATA="$DATA"
   PROJ=$(mktemp -d)
@@ -206,6 +207,72 @@ if command -v jq >/dev/null 2>&1; then
 else
   check "progress.jq (skipped — jq not installed)" 0 ""
 fi
+
+echo "== fix-gate =="
+
+# A fix session names its finding in the file PREDICTABLE_FIX_TARGET points at.
+fix_target() {
+  PREDICTABLE_FIX_TARGET="$DATA/target.json"
+  export PREDICTABLE_FIX_TARGET
+  printf '{"fqn":"Code.cards.totalUnits","vc":"il1.null-dereference","category":null}' \
+    >"$PREDICTABLE_FIX_TARGET"
+}
+reported() {
+  STUB_FIXCHECK="$DATA/answer.json"
+  export STUB_FIXCHECK
+  printf '{"verdict":"%s","reason":"%s","codeDigest":"%s","introduced":[%s]}' \
+    "$1" "$2" "$3" "${4:-}" >"$STUB_FIXCHECK"
+}
+
+fresh_data
+run_hook fix-gate.sh stop.json
+rc=1
+[ -z "$OUT" ] && [ "$CODE" -eq 0 ] && rc=0
+check "fix-gate outside a fix session -> silent, never blocks" "$rc" "got exit $CODE: $OUT"
+
+fresh_data
+fix_target
+reported reported "a complete sync still reports it" d1
+run_hook fix-gate.sh stop.json
+contains "$OUT" '"decision": "block"' && contains "$OUT" 'still reports it'
+check "fix-gate reported -> block, quoting the check" $?
+contains "$OUT" "fix-check --fqn 'Code.cards.totalUnits' --vc 'il1.null-dereference'"
+check "fix-gate tells the agent the exact check to run" $?
+
+fresh_data
+fix_target
+reported regressed "it is gone, but the change introduced 1 new finding" d2 '"Code.cards.lastUnits|il1.x"'
+run_hook fix-gate.sh stop.json
+contains "$OUT" '"decision": "block"' && contains "$OUT" 'Code.cards.lastUnits|il1.x'
+check "fix-gate regressed -> block, naming what the change introduced" $?
+
+fresh_data
+fix_target
+reported gone "no longer reported" d3
+run_hook fix-gate.sh stop.json
+rc=1
+[ -z "$OUT" ] && [ "$CODE" -eq 0 ] && rc=0
+check "fix-gate gone -> the turn may end" "$rc" "got: $OUT"
+
+fresh_data
+fix_target
+reported reported "still reported" d4
+run_hook fix-gate.sh stop.json
+run_hook fix-gate.sh stop-hook-active.json
+rc=1
+[ -z "$OUT" ] && rc=0
+check "fix-gate blocked before and nothing changed -> released (no spin)" "$rc" "got: $OUT"
+reported reported "still reported" d5
+run_hook fix-gate.sh stop-hook-active.json
+contains "$OUT" '"decision": "block"'
+check "fix-gate blocked before but the code changed -> blocks again" $?
+
+fresh_data
+fix_target
+STUB_FAIL=1 run_hook fix-gate.sh stop.json
+rc=1
+[ -z "$OUT" ] && [ "$CODE" -eq 0 ] && rc=0
+check "fix-gate check cannot run -> never traps the session" "$rc" "got exit $CODE: $OUT"
 
 echo "== sync-run =="
 

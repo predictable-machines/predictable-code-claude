@@ -50,6 +50,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/fix-gate.sh",
+            "timeout": 1800
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/sync-run.sh",
             "timeout": 60
           }
