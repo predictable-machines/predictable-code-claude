@@ -109,6 +109,7 @@ to run it.
 | **`UserPromptSubmit` / `PreCompact`** | Re-injects the last verdict so the agent always knows the sync state. |
 | **`PreToolUse`** (Bash `git push`/`git commit`) | Runs `sync` synchronously and **blocks only on a broken requirement** (`specViolation`). Every other verdict is advisory (warn, don't block), and a sync that does not run never blocks — the gate says why. |
 | **`Stop` / `SubagentStop`** | Advisory turn-end `sync` (skipped if one is already running) so the agent keeps working toward an in-sync state. |
+| **`Stop`** (inside a `predictable fix` session) | The fix gate (`scripts/fix-gate.sh`): the agent may not end its turn until `predictable fix-check` reads `gone` for the finding being fixed — no longer reported, and the project left with fewer findings than the fix started from. It is released when nothing changed since its last block (the `predictable fix` driver then decides whether the loop is stuck) and never traps a session whose check cannot run. |
 
 Edits do **not** trigger a sync: the skill runs its own `predictable sync` after
 changing code, and two syncs on one project at once are never allowed — every hook
@@ -207,7 +208,7 @@ timeline is in `$PLUGIN_DATA/session-history.jsonl` and `hook-events.log`.
 .claude-plugin/plugin.json       # manifest — no userConfig, no mcpServers
 .claude-plugin/marketplace.json  # marketplace catalog (source: ./)
 hooks/hooks.json                 # command hooks (portable across hosts)
-scripts/                         # bootstrap, sync-run, sync-gate, status-context, doctor, lib
+scripts/                         # bootstrap, sync-run, sync-gate, fix-gate, status-context, doctor, lib
 bin/predictable                  # wrapper → downloaded runtime (env-primed), dev fallback
 skills/sync/SKILL.md             # the single skill
 fixtures/                        # captured hook inputs + verdict samples (tests)

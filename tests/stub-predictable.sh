@@ -14,6 +14,20 @@ case "$1" in
     echo "predictable (stub) 0.0.0"
     exit 0
     ;;
+  fix-check)
+    # `fix-check --json`: the fix gate's question. $STUB_FIXCHECK names the answer to print
+    # (default: gone); $STUB_FAIL=1 is a check that could not run.
+    if [ "${STUB_FAIL:-}" = "1" ]; then
+      echo "stub: simulated fix-check failure" >&2
+      exit 1
+    fi
+    if [ -n "${STUB_FIXCHECK:-}" ] && [ -f "$STUB_FIXCHECK" ]; then
+      cat "$STUB_FIXCHECK"
+    else
+      printf '{"verdict":"gone","reason":"no longer reported","codeDigest":"d0","introduced":[]}\n'
+    fi
+    exit 0
+    ;;
 esac
 
 # Record the session the hook handed the sync, for the test that checks it.
