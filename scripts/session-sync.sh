@@ -137,8 +137,7 @@ else
 fi
 # Make the invisible visible. The detached sync above can NEVER appear in the
 # user's shell panel — that panel only shows tasks the agent itself launches —
-# so one combined JSON carries both audiences: a one-line `systemMessage` for
-# the user, and `additionalContext` instructing the agent to start an ATTACH
+# so `additionalContext` instructs the agent to start an ATTACH
 # task on its first turn (the product's sync lock joins it to the running
 # check: one pipeline, shared result). The attach task is what gives the user
 # a visible shell AND gives the agent a completion notification to react to.
@@ -147,11 +146,12 @@ fi
 sync_cmd="$bin"
 [ -x "$bin" ] || sync_cmd="predictable"
 if pc_have_jq; then
+  # No `systemMessage`: it renders as an alarm (`pc_verdict_alarms`), and the status
+  # line already says "syncing".
   jq -n \
-    --arg message "Predictable Code is syncing the project in the background." \
     --arg context "A Predictable Code spec check was just started in the background (detached from a hook, so it has no visible shell). On your FIRST turn this session, before other tool calls, start \`$sync_cmd sync --json\` as a BACKGROUND shell task and keep working — never block a turn on it. The project sync lock makes it attach to the running check (one pipeline, shared result; if the check already finished it re-checks incrementally and fast). Its shell is the user's window into the sync, and its completion notification is your cue to briefly report the verdict (verified/violated counts and findings)." \
-    '{systemMessage: $message, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $context}}'
+    '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $context}}'
 else
-  pc_emit_system_message "Predictable Code is syncing the project in the background."
+  pc_emit_context SessionStart "Predictable Code is syncing the project in the background."
 fi
 exit 0

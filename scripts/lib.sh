@@ -309,6 +309,20 @@ pc_verdict_name() { # file
 }
 
 # One-line human summary for a verdict name.
+# Whether a verdict is one the USER must act on. Claude Code renders every hook
+# `systemMessage` as a warning — a red alert block on the mobile app under Remote
+# Control — and has no other level for one (#2507), so routine good news said there
+# reads as a failure and a real one cannot stand out. A systemMessage is therefore
+# kept for these verdicts, for a sync that did not run and for the gate's deny;
+# every other outcome is the status line's (the user's, which shows it already) and
+# additionalContext's (the agent's).
+pc_verdict_alarms() { # verdict-name
+  case "$1" in
+    specViolation | verificationError) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 pc_verdict_summary() { # verdict-name
   case "$1" in
     inSync) printf '%s' 'in sync — the code satisfies its spec' ;;

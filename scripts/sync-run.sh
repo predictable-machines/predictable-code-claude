@@ -111,6 +111,11 @@ esac
 # Claude has fixed — as context (advisory; never blocks the turn). On Stop this
 # reads as the closing "proven in sync" summary once the code lands in sync.
 summary="$(pc_session_summary)"
+# On Stop the summary is the USER's (systemMessage), said only when the verdict asks
+# them to act; a routine one is on the status line already (`pc_verdict_alarms`).
+case "$event" in
+  Stop | SubagentStop) pc_verdict_alarms "$(pc_verdict_name "$verdict_file")" || summary="" ;;
+esac
 advisory="$failure"
 if [ -n "$summary" ]; then
   advisory="${advisory:+$advisory

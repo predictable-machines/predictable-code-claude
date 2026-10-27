@@ -86,7 +86,11 @@ case "$verdict" in
     exit 0
     ;;
   *)
-    pc_emit_system_message "Predictable Code: $(pc_verdict_summary "$verdict") — allowing the $verbs (advisory; only a broken requirement blocks)."
+    # A pass the user need not act on says nothing: the status line already shows the
+    # verdict, and a systemMessage would read as an alarm (`pc_verdict_alarms`).
+    if pc_verdict_alarms "$verdict"; then
+      pc_emit_system_message "Predictable Code: $(pc_verdict_summary "$verdict") — allowing the $verbs (advisory; only a broken requirement blocks)."
+    fi
     exit 0
     ;;
 esac

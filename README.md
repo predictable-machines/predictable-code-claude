@@ -196,6 +196,13 @@ work, the hooks inject the running story as context:
   this session; Claude fixed all N. Every checked requirement is now proven
   against its spec.`
 
+**Who is told what.** Claude Code renders every hook `systemMessage` as a warning (a red
+alert block on the mobile app under Remote Control), and its hooks have no other level for one.
+So a `systemMessage` is said only when you must act: a broken requirement (`specViolation`), a
+check that could not finish (`verificationError`), a check that did not run, and the commit/push
+gate's deny. Everything routine (a sync started or finished, an advisory gate pass, the session
+tally) is on the status line for you and in `additionalContext` for Claude.
+
 The counts are ground truth from the SMT verdict (`verificationError` →
 real errors + refuted contracts; `inSync` → residual refutations), not
 heuristics — so "Claude fixed N issues Predictable caught, and the result is

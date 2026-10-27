@@ -140,18 +140,34 @@ check "a denied push is counted as blocked, and only it" "$rc" "out=$OUT"
 
 # The notice names the command it gated: a commit is not a push.
 fresh_data
-STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
+STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
   run_hook sync-gate.sh pre-tool-use-git-commit-options.json
 rc=1
 contains "$OUT" 'allowing the commit (advisory' && ! contains "$OUT" 'push' && rc=0
-check "git commit + mechanical -> the notice says commit, not push" "$rc" "out=$OUT"
+check "git commit + verificationError -> the notice says commit, not push" "$rc" "out=$OUT"
 
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+contains "$OUT" 'allowing the push (advisory' && rc=0
+check "git push + verificationError -> the notice says push" "$rc" "out=$OUT"
+
+# Claude Code renders every systemMessage as an alarm (a red block on mobile, #2507), so a
+# pass the user need not act on says nothing; the status line shows the verdict.
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
   run_hook sync-gate.sh pre-tool-use-git-push.json
 rc=1
-contains "$OUT" 'allowing the push (advisory' && rc=0
-check "git push + mechanical -> the notice says push" "$rc" "out=$OUT"
+[ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
+check "git push + mechanical -> allowed in silence (no alarm-styled systemMessage)" "$rc" "out=$OUT"
+
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh stop.json
+rc=1
+contains "$OUT" 'systemMessage' && contains "$OUT" 'issue' && rc=0
+check "Stop + specViolation -> the summary IS a systemMessage (the user must act)" "$rc" "out=$OUT"
 
 # A read-only git command that merely contains the word must not run a check.
 fresh_data
@@ -333,11 +349,14 @@ STUB_VERDICT="$ROOT/fixtures/verdict-verificationError.json" PREDICTABLE_SYNC_FO
 contains "$OUT" 'issue' && ! contains "$OUT" 'Proven'
 check "iter1 (verificationError) -> reports open issues" $? "out=$OUT"
 
-# Iteration 2 at Stop: inSync = 0 issues -> closing summary crediting the fixes.
+# Iteration 2 at Stop: inSync = 0 issues. Routine news is not a systemMessage, which Claude
+# Code renders as an alarm (#2507): the status line shows it, and the next prompt's context
+# carries the closing summary below.
 STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
   run_hook sync-run.sh stop.json
-contains "$OUT" 'Proven in sync' && contains "$OUT" 'fixed all 3'
-check "iter2 (inSync) -> closing summary reports 3 issues fixed" $? "out=$OUT"
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$OUT" 'systemMessage' && rc=0
+check "iter2 (inSync) at Stop -> no alarm-styled systemMessage" "$rc" "out=$OUT"
 
 run_hook status-context.sh user-prompt-submit.json
 contains "$OUT" 'Proven in sync' && contains "$OUT" 'fixed all 3'
@@ -364,6 +383,9 @@ STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 
 rc=1
 [ "$CODE" -eq 0 ] && [ -f "$DATA/last-verdict.json" ] && rc=0
 check "SessionStart(startup)+git -> fires sync, persists verdict" "$rc" "exit $CODE"
+rc=1
+contains "$OUT" 'additionalContext' && ! contains "$OUT" 'systemMessage' && rc=0
+check "SessionStart(startup) -> tells the agent, no alarm-styled systemMessage" "$rc" "out=$OUT"
 
 # resume source -> no-op (state already exists; don't re-sync).
 fresh_data

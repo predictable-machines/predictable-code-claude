@@ -118,8 +118,15 @@ $body"
 fi
 message="$notice"
 if [ -n "$announce" ]; then
-  message="${message:+$message
+  if pc_verdict_alarms "$run_verdict"; then
+    message="${message:+$message
 }$announce"
+  else
+    # Routine: the status line shows it to the user; the agent reads it here.
+    body="$announce${body:+
+
+$body}"
+  fi
 fi
 
 # The brand + AskUserQuestion rules ride on every turn's context so they apply

@@ -155,6 +155,7 @@ mv "$inner" "$runtime_dir" 2>/dev/null || cp -R "$inner" "$runtime_dir"
 : >"$ready"
 
 rm -rf "$tmp" "$staging" 2>/dev/null || true
-pc_emit_system_message "Predictable Code: installed runtime v$version for $platform."
+# Routine news, so the agent's context rather than an alarm-styled systemMessage (#2507).
+pc_emit_context SessionStart "Predictable Code: installed runtime v$version for $platform."
 pc_log SessionStart bootstrap installed
 exit 0
