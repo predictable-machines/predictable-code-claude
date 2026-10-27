@@ -325,6 +325,37 @@ rc=1
 [ -z "$OUT" ] && [ "$CODE" -eq 0 ] && rc=0
 check "fix-gate check cannot run -> never traps the session" "$rc" "got exit $CODE: $OUT"
 
+echo "== control-center-url (the /predictable-code:report link) =="
+
+# The link names the project EXACTLY as the Control Center's `cloudProjectIdOf` does:
+# `gh-<owner>.<name>`, lowercased, anything outside a part's alphabet written `~hh`. The old
+# rule folded non-alphanumerics to `-`, so Bridge's link opened "gh-predictable-machines-javi-bridge
+# isn't registered here" (#2527). The expected ids are the Control Center's own output; the last
+# two would be ONE project under the old rule.
+url_for() { # origin
+  _home=$(mktemp -d)
+  mkdir -p "$_home/.predictable-code"
+  printf '{"url":"http://localhost:5473/"}' >"$_home/.predictable-code/cloud-session.json"
+  fresh_data
+  git -C "$CLAUDE_PROJECT_DIR" init -q 2>/dev/null
+  git -C "$CLAUDE_PROJECT_DIR" remote add origin "$1"
+  HOME="$_home" sh "$ROOT/scripts/control-center-url.sh"
+  rm -rf "$_home"
+}
+for pair in \
+  "git@github.com:Predictable-Machines-Javi/bridge.git|gh-predictable-machines-javi.bridge" \
+  "https://github.com/acme/foo.bar.git|gh-acme.foo.bar" \
+  "https://github.com/Acme/Naïve.Repo|gh-acme.na~c3~afve.repo" \
+  "https://github.com/acme/foo-bar|gh-acme.foo-bar" \
+  "https://github.com/acme-foo/bar|gh-acme-foo.bar"; do
+  origin=${pair%%|*}
+  want=${pair#*|}
+  got=$(url_for "$origin")
+  rc=1
+  [ "$got" = "http://localhost:5473/?project=$want" ] && rc=0
+  check "report link for $origin names project $want" "$rc" "got: $got"
+done
+
 echo "== sync-run =="
 
 # A non-Stop event exercises emit_advisory's additionalContext fallback branch.

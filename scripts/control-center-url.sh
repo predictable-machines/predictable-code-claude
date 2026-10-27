@@ -7,9 +7,12 @@
 # to the plane this machine is signed in to, opened on this repository.
 #
 # The plane is the one `predictable login` saved; the project is the checkout's
-# `origin`, named the way the plane names a repository's project
-# (`cloudProjectIdOf` in the Control Center: `gh-` and the `owner/repo` with every
-# run of non-alphanumerics made one `-`). Exit 0 with the link, 1 with the reason.
+# `origin`, named EXACTLY the way the plane names a repository's project
+# (`cloudProjectIdOf` in the Control Center): `gh-<owner>.<name>`, lowercased, each
+# character outside its part's alphabet written as `~` and its UTF-8 bytes in hex.
+# The old rule (every run of non-alphanumerics made one `-`) named a project the
+# plane no longer has, and the link opened "isn't registered here" (#2527).
+# Exit 0 with the link, 1 with the reason.
 
 self_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 # shellcheck source=scripts/lib.sh
@@ -37,5 +40,21 @@ case "$slug" in
     exit 1
     ;;
 esac
-project="gh-$(printf '%s' "$slug" | sed -E 's#[^A-Za-z0-9]+#-#g')"
+# One part of the id: lowercased, then byte by byte, a byte of the part's alphabet
+# kept and any other written `~hh` — what `idPart` does over UTF-8 in the plane.
+# `$2` is `name` for a repository name, which may also hold `.`.
+id_part() { # text owner|name
+  # ASCII lowercase on purpose (`LC_ALL=C`): GitHub owners and names are ASCII, and a locale's
+  # multi-byte case mapping is exactly what `od` would then read differently on each machine.
+  printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | od -An -v -tx1 | tr ' ' '\n' |
+    while IFS= read -r h; do
+      [ -n "$h" ] || continue
+      case "$h" in
+        3[0-9] | 6[1-9a-f] | 7[0-9a] | 5f | 2d) printf '%b' "\\0$(printf '%03o' "0x$h")" ;;
+        2e) if [ "$2" = name ]; then printf '.'; else printf '~2e'; fi ;;
+        *) printf '~%s' "$h" ;;
+      esac
+    done
+}
+project="gh-$(id_part "${slug%%/*}" owner).$(id_part "${slug#*/}" name)"
 printf '%s/?project=%s\n' "${plane%/}" "$project"
