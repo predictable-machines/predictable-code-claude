@@ -113,6 +113,21 @@ pc_publishes() { # command
   done | grep -q yes
 }
 
+# What a gated command publishes, in the words the gate's notices use: "commit",
+# "push" or "commit and push". A commit is not a push, and the notice says which.
+pc_gated_verbs() { # command
+  _pc_subs=$(pc_segments "$1" | while IFS= read -r _pc_seg; do pc_git_subcommand "$_pc_seg"; done)
+  _pc_commit=$(printf '%s\n' "$_pc_subs" | grep -cx commit)
+  _pc_push=$(printf '%s\n' "$_pc_subs" | grep -cx push)
+  if [ "$_pc_commit" -gt 0 ] && [ "$_pc_push" -gt 0 ]; then
+    printf '%s' 'commit and push'
+  elif [ "$_pc_push" -gt 0 ]; then
+    printf '%s' 'push'
+  else
+    printf '%s' 'commit'
+  fi
+}
+
 # True when EVERY segment runs one of Predictable's own verbs. Every, not any:
 # `git push && predictable sync` must not be approved on its second half.
 pc_is_own_command() { # command
@@ -431,7 +446,9 @@ pc_session_summary() {
       | (last.issues) as $cur
       | (last.verdict) as $vd
       | length as $iters
-      | ([.[] | select(.event == "sync-gate" and .verdict != "inSync")] | length) as $gate
+      # The gate denies on specViolation and on nothing else (sync-gate.sh), so only
+      # those are blocked commands; every other verdict was let through with a notice.
+      | ([.[] | select(.event == "sync-gate" and .verdict == "specViolation")] | length) as $gate
       | ($peak - $cur) as $fixed
       | (if $vd == "inSync" and $peak > 0 then
            "✓ Proven in sync — Predictable surfaced \($peak) issue(s) in the code this session; Claude fixed all \($peak) over \($iters) sync(s). Every checked requirement is now proven against its spec."
@@ -446,7 +463,9 @@ pc_session_summary() {
          else
            "Predictable: \($cur) issue(s) open (\($iters) sync(s)). /predictable-code:report opens them in the Control Center."
          end)
-      + (if $gate > 0 then " · gate blocked \($gate) push(es) while out of sync." else "" end)
+      + (if $gate == 1 then " · the gate blocked 1 commit or push on a broken requirement."
+         elif $gate > 1 then " · the gate blocked \($gate) commits or pushes on a broken requirement."
+         else "" end)
     end
   ' "$_pc_hist" 2>/dev/null || printf ''
 }

@@ -118,6 +118,41 @@ rc=1
 [ "$CODE" -eq 2 ] && contains "$OUT" '"permissionDecision": "deny"' && rc=0
 check "git push && predictable sync -> deny (no ride-along approval)" "$rc" "exit $CODE out=$OUT"
 
+# The gate blocks only on specViolation, so the session summary may count only those.
+# It counted every non-inSync gate event: three allowed passes (noCode, mechanical,
+# mechanical) read "gate blocked 3 push(es)" while nothing had been blocked (#2505).
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
+  run_hook sync-gate.sh pre-tool-use-git-commit-options.json
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+! contains "$OUT" 'blocked' && rc=0
+check "allowed gate passes are not counted as blocked" "$rc" "out=$OUT"
+
+STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+contains "$OUT" 'the gate blocked 1 commit or push' && rc=0
+check "a denied push is counted as blocked, and only it" "$rc" "out=$OUT"
+
+# The notice names the command it gated: a commit is not a push.
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
+  run_hook sync-gate.sh pre-tool-use-git-commit-options.json
+rc=1
+contains "$OUT" 'allowing the commit (advisory' && ! contains "$OUT" 'push' && rc=0
+check "git commit + mechanical -> the notice says commit, not push" "$rc" "out=$OUT"
+
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+contains "$OUT" 'allowing the push (advisory' && rc=0
+check "git push + mechanical -> the notice says push" "$rc" "out=$OUT"
+
 # A read-only git command that merely contains the word must not run a check.
 fresh_data
 run_hook sync-gate.sh pre-tool-use-git-log.json

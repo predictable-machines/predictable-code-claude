@@ -70,11 +70,12 @@ pc_clear_sync_failure
 
 verdict="$(pc_verdict_name "$verdict_file")"
 pc_log PreToolUse sync-gate "$verdict"
+verbs="$(pc_gated_verbs "$cmd")"
 
 # Only a genuine refutation blocks; everything else is advisory (allow + notice).
 case "$verdict" in
   specViolation)
-    reason="Predictable Code blocked this command: $(pc_verdict_summary "$verdict"). Fix the refuted requirement(s) and re-run the check until the code is back in sync before pushing."
+    reason="Predictable Code blocked this command: $(pc_verdict_summary "$verdict"). Fix the refuted requirement(s) and re-run the check until the code is back in sync before the $verbs."
     # Emit the structured deny AND a stderr reason, and exit 2: whichever signal
     # the host honors, the command is blocked.
     pc_emit_deny "$reason"
@@ -85,7 +86,7 @@ case "$verdict" in
     exit 0
     ;;
   *)
-    pc_emit_system_message "Predictable Code: $(pc_verdict_summary "$verdict") — allowing the push (advisory; only a broken requirement blocks)."
+    pc_emit_system_message "Predictable Code: $(pc_verdict_summary "$verdict") — allowing the $verbs (advisory; only a broken requirement blocks)."
     exit 0
     ;;
 esac
