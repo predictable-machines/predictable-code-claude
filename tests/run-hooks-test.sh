@@ -159,8 +159,9 @@ fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-mechanical.json" \
   run_hook sync-gate.sh pre-tool-use-git-push.json
 rc=1
-[ "$CODE" -eq 0 ] && [ -z "$OUT" ] && rc=0
-check "git push + mechanical -> allowed in silence (no alarm-styled systemMessage)" "$rc" "out=$OUT"
+[ "$CODE" -eq 0 ] && ! contains "$OUT" 'systemMessage' && contains "$OUT" 'additionalContext' \
+  && contains "$OUT" 'ONE short plain line of your reply' && contains "$OUT" 'it was allowed' && rc=0
+check "git push + mechanical -> no alarm; the agent is asked to say it in its reply" "$rc" "out=$OUT"
 
 fresh_data
 STUB_VERDICT="$ROOT/fixtures/verdict-specViolation.json" PREDICTABLE_SYNC_FOREGROUND=1 \
@@ -324,6 +325,29 @@ STUB_FAIL=1 run_hook fix-gate.sh stop.json
 rc=1
 [ -z "$OUT" ] && [ "$CODE" -eq 0 ] && rc=0
 check "fix-gate check cannot run -> never traps the session" "$rc" "got exit $CODE: $OUT"
+
+echo "== a finished sync is relayed by the agent, never an alarm (#2507) =="
+
+# A sync that FINISHED since the last prompt, with a routine verdict: no systemMessage (red on
+# the mobile app), and the agent is asked to say it in one plain line of its reply, since the
+# status line does not reach the mobile app under Remote Control either.
+fresh_data
+printf '{"runId":"run-2","response":{"mechanical":{}}}' >"$CLAUDE_PROJECT_DIR/.predictable-code/.last-sync-response.json"
+printf 'run-1\n' >"$DATA/announced-sync-run"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+! contains "$OUT" 'systemMessage' && contains "$OUT" 'ONE short plain line of your reply' \
+  && contains "$OUT" 'sync finished' && rc=0
+check "a routine finished sync -> relayed through the agent's reply, no systemMessage" "$rc" "out=$OUT"
+
+# An alarming one is still the user's own systemMessage.
+fresh_data
+printf '{"runId":"run-2","response":{"specViolation":{}}}' >"$CLAUDE_PROJECT_DIR/.predictable-code/.last-sync-response.json"
+printf 'run-1\n' >"$DATA/announced-sync-run"
+run_hook status-context.sh user-prompt-submit.json
+rc=1
+contains "$OUT" 'systemMessage' && contains "$OUT" 'SPEC VIOLATION' && rc=0
+check "a finished sync with a broken requirement -> still a systemMessage" "$rc" "out=$OUT"
 
 echo "== control-center-url (the /predictable-code:report link) =="
 

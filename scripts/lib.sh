@@ -323,6 +323,14 @@ pc_verdict_alarms() { # verdict-name
   esac
 }
 
+# Routine news, for the AGENT to say in its own reply. A systemMessage renders as an alarm
+# and the status line does not reach the mobile app under Remote Control, so the agent's
+# reply is the one channel every surface shows without alarm: the context carries the
+# news and asks for it in one plain line (#2507).
+pc_relay_to_user() { # news
+  printf '%s' "Tell the user this in ONE short plain line of your reply (not as a warning, no heading): $1"
+}
+
 pc_verdict_summary() { # verdict-name
   case "$1" in
     inSync) printf '%s' 'in sync — the code satisfies its spec' ;;

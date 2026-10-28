@@ -90,6 +90,9 @@ case "$verdict" in
     # verdict, and a systemMessage would read as an alarm (`pc_verdict_alarms`).
     if pc_verdict_alarms "$verdict"; then
       pc_emit_system_message "Predictable Code: $(pc_verdict_summary "$verdict") — allowing the $verbs (advisory; only a broken requirement blocks)."
+    else
+      # Routine: the agent mentions it in its reply (`pc_relay_to_user`), never an alarm.
+      pc_emit_context PreToolUse "$(pc_relay_to_user "Predictable Code checked the code before this $verbs: $(pc_verdict_summary "$verdict"); it was allowed.")"
     fi
     exit 0
     ;;

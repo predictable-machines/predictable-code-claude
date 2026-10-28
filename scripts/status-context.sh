@@ -122,8 +122,9 @@ if [ -n "$announce" ]; then
     message="${message:+$message
 }$announce"
   else
-    # Routine: the status line shows it to the user; the agent reads it here.
-    body="$announce${body:+
+    # Routine: the agent says it in its reply, the one channel the mobile app shows without
+    # alarm (`pc_relay_to_user`); the status line shows it in the terminal.
+    body="$(pc_relay_to_user "$announce")${body:+
 
 $body}"
   fi
