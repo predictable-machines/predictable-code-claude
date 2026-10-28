@@ -19,6 +19,13 @@ prove/verify → diagnose) and returns a single verdict. There are no other verb
 > `specs/` is never a blocker and never a reason to fall back to manual review. Your
 > job is to run Predictable and relay its results, not to reproduce its analysis.
 
+> **Never commit the spec pages the sync writes.** The per-file pages and the
+> overview it writes under `specs/` are Predictable's: they are kept in its own
+> database, never on the code's branch. Stage your work with `predictable
+> stage-agent-work` (or name the files you changed) rather than `git add -A`; the
+> commit gate refuses a commit that would carry them. A spec a person or you wrote
+> is committed as usual.
+
 > **Speak the user's language — hide BOTH the internals AND the formal-methods
 > jargon.** The user is a developer of THIS repo, in ITS language (Java,
 > TypeScript, …) — not a formal-verification expert. Two things they must never see:

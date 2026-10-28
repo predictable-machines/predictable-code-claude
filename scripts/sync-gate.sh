@@ -42,6 +42,37 @@ if ! pc_publishes "$cmd"; then
   exit 0
 fi
 
+# THE PAGES THE ANALYSIS INFERRED ARE PREDICTABLE'S, never the code's (#2529). On Bridge the
+# agent's own `git add` committed ten of them to `main`; once their files left the analysis, Specs
+# listed them as authored specs tied to no source. Decided before the sync, which they do not
+# depend on. A refusal with its remedy, not a verdict: the agent unstages them and commits again.
+if pc_commits "$cmd"; then
+  whole=no
+  pc_adds_whole_tree "$cmd" && whole=yes
+  pages="$(pc_inferred_pages_committed "$whole")"
+  if [ -n "$pages" ]; then
+    count=$(printf '%s\n' "$pages" | grep -c .)
+    listed=$(printf '%s\n' "$pages" | head -n 10 | sed 's/^/  /')
+    more=""
+    if [ "$count" -gt 10 ]; then
+      more="
+  … and $((count - 10)) more"
+    fi
+    if [ "$whole" = yes ]; then
+      remedy="Stage your work with \`predictable stage-agent-work\` (it leaves these pages out) or name the files you changed, instead of adding the whole tree, then commit."
+    else
+      remedy="Unstage them (\`git reset -q -- <page>…\`, or stage with \`predictable stage-agent-work\`), then commit."
+    fi
+    reason="Predictable Code: this commit would carry $count spec page(s) the analysis inferred. They belong to Predictable's database and are kept there, never on the code's branch:
+$listed$more
+$remedy A spec a person or you wrote is committed as usual."
+    pc_log PreToolUse sync-gate inferred-pages
+    pc_emit_deny "$reason"
+    printf '%s\n' "$reason" >&2
+    exit 2
+  fi
+fi
+
 verdict_file="$(pc_last_verdict_file)"
 
 # `sync --json --claude` auto-initializes the project if needed (product-side), so

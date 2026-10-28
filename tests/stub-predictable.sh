@@ -14,6 +14,15 @@ case "$1" in
     echo "predictable (stub) 0.0.0"
     exit 0
     ;;
+  staged-inferred-pages)
+    # The commit gate's question (#2529): $STUB_INFERRED is the JSON array to print (default:
+    # none); $STUB_ARGS_OUT records the arguments, so a test can tell `--untracked` was asked.
+    if [ -n "${STUB_ARGS_OUT:-}" ]; then
+      printf '%s' "$*" >"$STUB_ARGS_OUT"
+    fi
+    printf '%s\n' "${STUB_INFERRED:-[]}"
+    exit 0
+    ;;
   fix-check)
     # `fix-check --json`: the fix gate's question. $STUB_FIXCHECK names the answer to print
     # (default: gone); $STUB_FAIL=1 is a check that could not run.

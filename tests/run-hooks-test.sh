@@ -118,6 +118,46 @@ rc=1
 [ "$CODE" -eq 2 ] && contains "$OUT" '"permissionDecision": "deny"' && rc=0
 check "git push && predictable sync -> deny (no ride-along approval)" "$rc" "exit $CODE out=$OUT"
 
+# THE PAGES THE ANALYSIS INFERRED never reach the code's branch (#2529). On Bridge the agent's
+# own `git add` committed ten of them to `main`.
+ARGS_OUT=$(mktemp)
+fresh_data
+STUB_INFERRED='["specs/src/main/kotlin/Bridge.kt.spec.md"]' STUB_ARGS_OUT="$ARGS_OUT" \
+  run_hook sync-gate.sh pre-tool-use-git-commit-options.json
+rc=1
+[ "$CODE" -eq 2 ] && contains "$OUT" '"permissionDecision": "deny"' &&
+  contains "$OUT" 'specs/src/main/kotlin/Bridge.kt.spec.md' && contains "$OUT" 'git reset' &&
+  ! contains "$(cat "$ARGS_OUT")" '--untracked' && rc=0
+check "a commit carrying a staged inferred page -> deny, naming it and how to unstage it" "$rc" "exit $CODE out=$OUT"
+
+# One command that adds the whole tree and commits: nothing is staged yet when the gate looks,
+# so it asks what the add would carry.
+fresh_data
+STUB_INFERRED='["specs/test-data/box/placeholder.kt.spec.md"]' STUB_ARGS_OUT="$ARGS_OUT" \
+  run_hook sync-gate.sh pre-tool-use-git-add-all-commit.json
+rc=1
+[ "$CODE" -eq 2 ] && contains "$(cat "$ARGS_OUT")" '--untracked' &&
+  contains "$OUT" 'specs/test-data/box/placeholder.kt.spec.md' && contains "$OUT" 'stage-agent-work' && rc=0
+check "git add -A && git commit -> asks what the add would carry, and denies" "$rc" "exit $CODE out=$OUT"
+
+# Adding named files does not carry the pages: only what is staged is asked.
+fresh_data
+STUB_ARGS_OUT="$ARGS_OUT" run_hook sync-gate.sh pre-tool-use-git-add-file-commit.json
+rc=1
+[ "$CODE" -eq 0 ] && ! contains "$(cat "$ARGS_OUT")" '--untracked' &&
+  ! contains "$OUT" '"permissionDecision": "deny"' && rc=0
+check "git add <file> && git commit with no inferred page -> the ordinary gate" "$rc" "exit $CODE out=$OUT"
+
+# A push is not a commit: what it publishes is already committed.
+fresh_data
+: >"$ARGS_OUT"
+STUB_INFERRED='["specs/src/A.kt.spec.md"]' STUB_ARGS_OUT="$ARGS_OUT" \
+  run_hook sync-gate.sh pre-tool-use-git-push.json
+rc=1
+[ "$CODE" -eq 0 ] && [ ! -s "$ARGS_OUT" ] && rc=0
+check "a push does not ask about inferred pages" "$rc" "exit $CODE out=$OUT"
+rm -f "$ARGS_OUT"
+
 # The gate blocks only on specViolation, so the session summary may count only those.
 # It counted every non-inSync gate event: three allowed passes (noCode, mechanical,
 # mechanical) read "gate blocked 3 push(es)" while nothing had been blocked (#2505).

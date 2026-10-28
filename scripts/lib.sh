@@ -113,6 +113,43 @@ pc_publishes() { # command
   done | grep -q yes
 }
 
+# True when any segment runs `git commit`.
+pc_commits() { # command
+  pc_segments "$1" | while IFS= read -r _pc_seg; do
+    [ "$(pc_git_subcommand "$_pc_seg")" = commit ] && printf 'yes'
+  done | grep -q yes
+}
+
+# True when a segment runs a `git add` of the whole tree (`-A`, `--all`, `.`, `:/`, `*`) or
+# of the specs directory: in the same command as a commit, it stages the pages the analysis
+# inferred before the commit runs, after this gate has looked (#2529).
+pc_adds_whole_tree() { # command
+  pc_segments "$1" | while IFS= read -r _pc_seg; do
+    [ "$(pc_git_subcommand "$_pc_seg")" = add ] || continue
+    printf '%s\n' "$_pc_seg" | awk '{
+      seen = 0
+      for (i = 1; i <= NF; i++) {
+        if (!seen) { if ($i == "add") seen = 1; continue }
+        t = $i; gsub(/["\047]/, "", t)
+        if (t == "--all" || t == "." || t == "./" || t == ":/" || t == "*" ||
+            t ~ /^-[A-Za-z]*A[A-Za-z]*$/ || t ~ /^(\.\/)?specs(\/|$)/) { print "yes"; exit }
+      }
+    }'
+  done | grep -q yes
+}
+
+# The spec pages the analysis inferred that this commit would carry, one per line (#2529):
+# staged as new, and with `untracked` also those a whole-tree add would stage. Empty when
+# there are none or the runtime cannot say (an older one has no such verb): never a reason
+# to block on its own.
+pc_inferred_pages_committed() { # untracked(yes|no)
+  _pc_flag=""
+  [ "$1" = yes ] && _pc_flag="--untracked"
+  # shellcheck disable=SC2086  # `_pc_flag` is empty or one word.
+  (cd "$(pc_project_dir)" && "$(pc_predictable_bin)" staged-inferred-pages $_pc_flag --json 2>/dev/null) |
+    jq -r 'if type == "array" then .[] else empty end' 2>/dev/null || true
+}
+
 # What a gated command publishes, in the words the gate's notices use: "commit",
 # "push" or "commit and push". A commit is not a push, and the notice says which.
 pc_gated_verbs() { # command
