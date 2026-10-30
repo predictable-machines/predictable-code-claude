@@ -203,6 +203,14 @@ check that could not finish (`verificationError`), a check that did not run, and
 gate's deny. Everything routine (a sync started or finished, an advisory gate pass, the session
 tally) is on the status line for you and in `additionalContext` for Claude.
 
+**When the work will be done.** While Predictable runs, the status line names each running
+task with how far along it is and how long is left — `Predictable ⏳ sync 40% ~3m left` — and,
+when several run, when all of them will be done (`· all done in ~10m`): tasks of one lane run
+one after the other, so their times add up, and different lanes run at once, so the longest
+lane decides. An estimate is the median of the last ten durations of that kind of task in this
+project (`.task-durations.jsonl` in the branch's state directory); the percentage stays under
+100% until the task really ends, and a task with no history yet shows only how long it has run.
+
 The counts are ground truth from the SMT verdict (`verificationError` →
 real errors + refuted contracts; `inSync` → residual refutations), not
 heuristics — so "Claude fixed N issues Predictable caught, and the result is

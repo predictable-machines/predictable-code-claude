@@ -310,6 +310,51 @@ pc_sync_running() {
   [ "$_pc_lock_pid" -gt 0 ] && kill -0 "$_pc_lock_pid" 2>/dev/null
 }
 
+# THE TASKS THIS PROJECT HAS RUNNING, and how long such tasks took before, so the
+# statusline can say when they will be done (`statusline.sh`). A running task is one
+# file in the branch's state directory (`.tasks/`), naming what it is (`key`, its
+# history's name), its LANE (tasks of one lane run one after the other; tasks of
+# different lanes at once), a label, when it started and the pid that runs it. A task
+# that ends well appends its duration to `.task-durations.jsonl`; the newest 200 lines
+# are kept. Best-effort throughout: no state directory, no jq, nothing is recorded,
+# and nothing a hook does ever depends on it.
+pc_tasks_dir() { printf '%s/.tasks' "$(pc_state_dir)"; }
+pc_task_durations_file() { printf '%s/.task-durations.jsonl' "$(pc_state_dir)"; }
+
+# The pid of the shell that calls it: `$$` is the SCRIPT's pid in every subshell, and
+# a task run in a backgrounded subshell must name the subshell, which is what lives
+# exactly as long as the task does.
+pc_self_pid() { sh -c 'printf %s "$PPID"'; }
+
+# Record that a task started; prints the record's path for `pc_task_end`.
+pc_task_begin() { # key lane label pid
+  pc_have_jq || return 0
+  _pc_tasks="$(pc_tasks_dir)"
+  mkdir -p "$_pc_tasks" 2>/dev/null || return 0
+  _pc_task_file="$_pc_tasks/$1-$4.json"
+  jq -nc --arg key "$1" --arg lane "$2" --arg label "$3" \
+    --argjson start "$(date +%s)" --argjson pid "$4" \
+    '{key: $key, lane: $lane, label: $label, start: $start, pid: $pid}' \
+    >"$_pc_task_file" 2>/dev/null || return 0
+  printf '%s' "$_pc_task_file"
+}
+
+# Record that a task ended; one that ended `ok` adds its duration to the history its
+# key's estimate is read from. A task that failed adds nothing: a refusal in a second
+# is no measure of how long the work takes.
+pc_task_end() { # task-file ok|failed
+  [ -n "$1" ] && [ -f "$1" ] || return 0
+  if [ "$2" = ok ] && pc_have_jq; then
+    _pc_hist="$(pc_task_durations_file)"
+    jq -c --argjson now "$(date +%s)" '{key: .key, seconds: ($now - .start)}' "$1" \
+      >>"$_pc_hist" 2>/dev/null || true
+    if [ "$(wc -l <"$_pc_hist" 2>/dev/null || echo 0)" -gt 200 ]; then
+      tail -n 200 "$_pc_hist" >"$_pc_hist.tmp" 2>/dev/null && mv "$_pc_hist.tmp" "$_pc_hist" 2>/dev/null
+    fi
+  fi
+  rm -f "$1" 2>/dev/null || true
+}
+
 # Append one audit line: `<iso8601> <event> <matcher> <verdict>`. This is the
 # observable side effect the L5 integration tests assert on ("hooks fired"), so
 # it is best-effort but always attempted, even when jq is missing.

@@ -34,14 +34,50 @@ fi
 lock="$state/.sync.lock"
 result="$state/.last-sync-response.json"
 
+# THE RUNNING TASKS AND WHEN THEY WILL BE DONE. Each running task is a record in
+# `.tasks/` (`pc_task_begin`, lib.sh) whose pid still lives; a sync someone else started
+# shows only as the live lock, and counts as a sync that began when the lock was taken.
+# A task's estimate is the median of the last ten durations of its kind
+# (`.task-durations.jsonl`); its percentage is its time so far against that, held at
+# 95% until it really ends, so it never reads "done" on a guess. Several tasks also say
+# when ALL of them will be done: tasks of one lane run one after the other (their times
+# add up), different lanes run at once (the longest lane decides). With no history yet
+# a task shows only how long it has run.
+now_epoch=$(date +%s 2>/dev/null || printf '')
+running="[]"
+syncing=no
 if [ -n "$project" ] && [ -f "$lock" ]; then
   lock_pid=$(jq -r '.pid // 0' "$lock" 2>/dev/null || printf '0')
   case "$lock_pid" in
     '' | *[!0-9]*) lock_pid=0 ;;
   esac
   if [ "$lock_pid" -gt 0 ] && kill -0 "$lock_pid" 2>/dev/null; then
-    segment="Predictable ⏳ syncing…"
+    syncing=yes
   fi
+fi
+if [ -n "$project" ] && [ -d "$state/.tasks" ]; then
+  for task in "$state"/.tasks/*.json; do
+    [ -f "$task" ] || continue
+    task_pid=$(jq -r '.pid // 0' "$task" 2>/dev/null || printf '0')
+    case "$task_pid" in
+      '' | *[!0-9]*) task_pid=0 ;;
+    esac
+    if [ "$task_pid" -gt 0 ] && kill -0 "$task_pid" 2>/dev/null; then
+      running=$(printf '%s' "$running" | jq -c --slurpfile t "$task" '. + $t' 2>/dev/null || printf '%s' "$running")
+    fi
+  done
+fi
+if [ "$syncing" = yes ] && ! printf '%s' "$running" | jq -e 'any(.[]; .key == "sync")' >/dev/null 2>&1; then
+  lock_mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || printf '')
+  [ -n "$lock_mtime" ] || lock_mtime="$now_epoch"
+  running=$(printf '%s' "$running" | jq -c --argjson start "$lock_mtime" \
+    '. + [{key: "sync", lane: "sync", label: "sync", start: $start}]' 2>/dev/null || printf '%s' "$running")
+fi
+if [ -n "$now_epoch" ] && [ "$running" != "[]" ]; then
+  history="$state/.task-durations.jsonl"
+  [ -f "$history" ] || history=/dev/null
+  segment=$(jq -rn --argjson now "$now_epoch" --argjson tasks "$running" --slurpfile hist "$history" -f "$(dirname -- "$0")/tasks-eta.jq" 2>/dev/null || printf '')
+  [ -n "$segment" ] && segment="Predictable ⏳ $segment"
 fi
 
 if [ -z "$segment" ] && [ -n "$project" ] && [ -f "$result" ]; then

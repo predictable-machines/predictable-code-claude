@@ -868,6 +868,65 @@ rc=1
 [ -f "$DATA/hook-events.log" ] && rc=0
 check "hook-events.log written" "$rc" "expected $DATA/hook-events.log"
 
+echo "== statusline: running tasks and when they will be done =="
+
+# A sync the hook runs is a TASK: recorded while it runs, its duration kept once it ends.
+fresh_data
+STUB_VERDICT="$ROOT/fixtures/verdict-inSync.json" PREDICTABLE_SYNC_FOREGROUND=1 \
+  run_hook sync-run.sh post-tool-use-write.json
+rc=1
+hist="$PROJ/.predictable-code/.task-durations.jsonl"
+[ -f "$hist" ] && jq -e 'select(.key == "sync") | .seconds >= 0' "$hist" >/dev/null 2>&1 &&
+  [ -z "$(ls -A "$PROJ/.predictable-code/.tasks" 2>/dev/null)" ] && rc=0
+check "sync-run records the sync's duration and leaves no running task" "$rc" "hist=$(cat "$hist" 2>/dev/null)"
+
+# The estimate: the median of the kind's past durations; the percentage held under 100.
+statusline_of() { # project
+  printf '{"workspace":{"project_dir":"%s"},"model":{"display_name":"M"}}' "$1" |
+    "$ROOT/scripts/statusline.sh"
+}
+fresh_data
+st="$PROJ/.predictable-code"
+mkdir -p "$st/.tasks"
+now=$(date +%s)
+sleep 60 &
+sync_pid=$!
+printf '{"key":"sync","lane":"sync","label":"sync","start":%s,"pid":%s}\n' $((now - 120)) "$sync_pid" >"$st/.tasks/sync-$sync_pid.json"
+for s in 280 300 320; do printf '{"key":"sync","seconds":%s}\n' "$s"; done >"$st/.task-durations.jsonl"
+line=$(statusline_of "$PROJ")
+contains "$line" 'sync 40% ~3m left'
+check "one task: its percentage and the time left" $? "$line"
+
+sleep 60 &
+fix_pid=$!
+printf '{"key":"fix","lane":"agent","label":"fix","start":%s,"pid":%s}\n' $((now - 60)) "$fix_pid" >"$st/.tasks/fix-$fix_pid.json"
+for s in 600 660; do printf '{"key":"fix","seconds":%s}\n' "$s"; done >>"$st/.task-durations.jsonl"
+line=$(statusline_of "$PROJ")
+contains "$line" 'all done in ~10m'
+check "tasks in two lanes at once: done when the longest lane is" $? "$line"
+
+sleep 60 &
+again_pid=$!
+printf '{"key":"sync","lane":"sync","label":"sync","start":%s,"pid":%s}\n' "$now" "$again_pid" >"$st/.tasks/sync-$again_pid.json"
+line=$(statusline_of "$PROJ")
+contains "$line" 'all done in ~10m' && ! contains "$line" 'all done in ~8m'
+rc=$?
+kill "$fix_pid" 2>/dev/null; wait "$fix_pid" 2>/dev/null
+line=$(statusline_of "$PROJ")
+contains "$line" 'all done in ~8m'
+check "tasks in one lane add up; the longest lane decides" $((rc + $?)) "$line"
+
+rm -f "$st/.task-durations.jsonl"
+line=$(statusline_of "$PROJ")
+contains "$line" 'sync 2m' && ! contains "$line" '%'
+check "no history: only how long it has run, no guessed percentage" $? "$line"
+
+kill "$sync_pid" "$again_pid" 2>/dev/null
+wait 2>/dev/null
+line=$(statusline_of "$PROJ")
+! contains "$line" '⏳'
+check "a task whose process ended is not shown as running" $? "$line"
+
 echo
 printf 'L1: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

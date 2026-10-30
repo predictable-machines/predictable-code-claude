@@ -57,8 +57,12 @@ run_sync() { # event
   # that can say it (the next Stop to the user, the next prompt to the agent).
   tmp="$verdict_file.tmp.$$"
   err="$(pc_stderr_file)"
+  # A task the statusline can estimate (`pc_task_begin`): its time is measured here,
+  # where the sync starts and ends, and the next sync's estimate is read from it.
+  task="$(pc_task_begin sync sync "sync" "$(pc_self_pid)")"
   pc_run_sync "$tmp" "$err"
   code=$?
+  if [ "$code" -eq 0 ]; then pc_task_end "$task" ok; else pc_task_end "$task" failed; fi
   if [ "$code" -eq 0 ]; then
     mv "$tmp" "$verdict_file" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     pc_record_sync "$1" "$verdict_file"
