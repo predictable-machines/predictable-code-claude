@@ -1,0 +1,1320 @@
+# Predictable Code — analysis in your own GitHub Actions.
+#
+# WHAT THIS RUNS AND WHERE. Everything happens on your runner, in your repository,
+# billed to your account. Predictable's hosted Control Center dispatches this workflow
+# and reads the results you commit; it never runs your code and never holds a copy of
+# it. That is the whole compute model, and this file is the visible, auditable,
+# revocable form of it — delete it and the hosted side can do nothing to this repo.
+#
+# WHAT IT NEEDS FROM US. Only a download. The CLI lives in a private repository, so the
+# job proves who it is with the OIDC token GitHub mints for it and receives a
+# short-lived, pre-signed URL in return. No secret is stored in this repository, none
+# is configured, and no credential of ours ever reaches this runner.
+#
+# WHAT IT WRITES. `.predictable-code/` — the specs, inferred requirements, analysis and
+# datasets — onto a branch, as a pull request. Never straight to your default branch.
+#
+# The stamp below is how the Control Center knows whether this repository is running a
+# current copy. It is compared as a NUMBER, never as a diff, so your own edits to this
+# file — a bigger `runner:`, a different `heap_mb` — are yours and are left alone.
+# predictable-workflow-version: 25
+name: Predictable Code
+
+on:
+  workflow_dispatch:
+    inputs:
+      control_plane:
+        description: "Control Center base URL"
+        required: true
+        type: string
+      release_tag:
+        description: "Release to run, or 'latest'"
+        required: false
+        default: latest
+        type: string
+      command:
+        # WHAT THIS RUN IS FOR. One workflow rather than one per verb, because every
+        # verb needs the identical twenty lines above it — check out, prove who we are,
+        # download the runtime, put the launcher on PATH — and a second file would be a
+        # second copy of all of it to keep in step, in someone else's repository where
+        # we cannot fix it.
+        #
+        # `sync` analyses. `fix` applies the DETERMINISTIC fix for one finding: it is
+        # `predictable analyze fix-issue`, which edits narrowly and keeps the edit only
+        # if its own accept gates hold, so it needs no agent, no model and no API key of
+        # anybody's. That is why it is the fix this workflow can offer — an agent fix
+        # would need a provider key configured here, which would end the "no secret is
+        # stored in this repository" promise above.
+        description: "What to run: sync (analyse), fix (one deterministic fix), or fix-agent (one agent fix)."
+        required: false
+        default: sync
+        type: string
+      target:
+        description: "For a fix, the finding to fix. Ignored by sync."
+        required: false
+        default: ""
+        type: string
+      prompt:
+        # SUPPLIED, NOT REBUILT HERE. The Control Center's `fixPrompt` is the one
+        # producer of what a fix agent is asked — the desktop product uses the same
+        # function — and a second builder written in shell is how a hosted agent would
+        # come to be told something a local one is not.
+        description: "For command=fix-agent, what the agent is asked to do."
+        required: false
+        default: ""
+        type: string
+      runner:
+        # A BIGGER MACHINE IS THE ONLY LEVER FOR A BIG REPOSITORY TODAY, so it is
+        # offered rather than hidden.
+        #
+        # Measured on a 1,213-file TypeScript repository on the standard runner
+        # (2 cores, 7 GB): the tsc front end exhausted its 3,374 MB V8 old-space budget
+        # and TypeScript was reported as not translated, which leaves the analysis with
+        # nothing to read. Raising the budget on THAT machine does not help — V8's RSS
+        # runs above its old-space cap, so a cap near the machine's size trades a clean
+        # heap error for the kernel killing the process, which is why
+        # `nodeFrontEndHeapMb` caps at half the measured headroom on purpose.
+        #
+        # Sharding would be the answer that scales, and it is NOT available: a split
+        # invocation emits 10 of 95 documents differently and resolves fewer call
+        # targets, which reads downstream as fewer obligations against identical code.
+        # `make check-il-identity` gates that work and is red by design until it lands.
+        description: "Runner to analyse on. A large repository needs more memory than the standard runner has."
+        required: false
+        default: ubuntu-24.04
+        type: string
+      heap_mb:
+        # Only useful together with a bigger runner, for the reason above. Empty means
+        # the product decides from the memory it can actually see, which is the right
+        # default and the one every measurement here supports.
+        description: "Override the tsc front end V8 old-space budget, in MB. Leave empty to let the run size it from measured headroom."
+        required: false
+        default: ""
+        type: string
+
+# Least privilege, and each one is load-bearing:
+#   contents     — check the code out, and push the results branch
+#   id-token     — mint the OIDC token that authenticates this job to the control plane
+#   pull-requests— open the PR carrying the results
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+# One run at a time per ref, whatever it is. Two syncs in one tree is a documented
+# hazard, and so is a fix beside a sync — the fix's own edits leave a sync running as it
+# settles, which is why the desktop product refuses the same pair. The group deliberately
+# does NOT include the command, or a fix and a sync would be allowed to overlap.
+concurrency:
+  group: predictable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history: the analysis records which commit it describes, and a shallow
+          # clone makes that unanswerable.
+          fetch-depth: 0
+
+      - name: Check what a fix needs
+        # EVERY FIX VERB, not just the agent one. MEASURED, and it corrects a claim this
+        # file used to make: `predictable analyze fix-issue` is NOT model-free. Its own
+        # module header says it runs `AnalysisFixAgent.run`, and a real hosted run
+        # spawned `bin/claude` with an EMPTY `ANTHROPIC_API_KEY` and published a pull
+        # request containing nothing but our log.
+        #
+        # What actually separates the two verbs is the ACCEPT GATES: `fix-issue`
+        # re-translates, re-analyses, and DISCARDS the edit unless all four hold — so it
+        # is narrower and revertible, not unmodelled. Both need the customer's key.
+        #
+        # BEFORE THE DOWNLOAD, and that is the whole point of its position. A missing
+        # key discovered after installing the runtime package costs minutes of the
+        # customer's runner to tell them to add a secret; discovered here it costs
+        # seconds. The same reason the product refuses a control it cannot honour
+        # rather than starting a run that cannot finish.
+        if: inputs.command != 'sync'
+        env:
+          # NOT CONFIGURED BY US AND NOT REQUIRED OF ANYONE ELSE: this is the one
+          # secret the workflow reads, it is the customer's own, and it is read only on
+          # this verb. A repository that never runs an agent fix never needs it, which
+          # is why the file's promise is still that nothing must be configured to
+          # ANALYSE. An unset secret arrives as an empty string, never as an error.
+          #
+          # ONE EXPRESSION, TWO PLACES IT CAN BE SET. `secrets.ANTHROPIC_API_KEY`
+          # resolves whatever secret of that name this REPOSITORY CAN SEE — one set on
+          # the repository itself, or one set on the organisation and shared with it.
+          # The workflow does not and cannot tell them apart, and does not need to.
+          #
+          # AND ONE ALTERNATIVE NAME, WHICH IS A CONVENTION AND NOT A PRODUCT CONCEPT.
+          # `ORG_ANTHROPIC_KEY` is what one organisation already calls its org-wide key;
+          # measured on a repository whose org shared exactly that secret and whose fix
+          # still refused, because GitHub does not alias secret names and this expression
+          # only ever asked for one. A reader who finds this later should feel free to
+          # delete it once that org renames: it buys compatibility with a name somebody
+          # chose, never a capability.
+          #
+          # A FIXED PAIR, NOT A CONFIGURABLE NAME. Reading `secrets[inputs.…]` would let
+          # anyone who can dispatch this workflow name ANY org secret shared with the
+          # repository and have it injected into an agent's environment, where the agent
+          # can print it. That is an exfiltration path wearing the clothes of a feature,
+          # so the set of names this reads is closed and lives here.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.ORG_ANTHROPIC_KEY }}
+        run: |
+          set -euo pipefail
+          # WHICH ENGINE THIS REPOSITORY CHOSE, because the key it needs follows from it.
+          # `analyze fix-issue` dispatches through `mkFlowAdapter`, which honours the
+          # project's own `aiProvider` — so demanding an Anthropic key from a repository
+          # configured for another engine asks for a credential the run will never use,
+          # and then fails later for the real reason.
+          #
+          # MEASURED SPELLING: the field serialises the CONSTRUCTOR name — `claudeCode`,
+          # `copilotCli`, `opencodeCli` — not the `toKey` spellings (`claude`, `copilot`,
+          # `opencode`) that appear elsewhere in the codebase. Read from two real
+          # `project.json` files. A check written against the short names would match
+          # `claudeCode` by accident and `copilotCli` by accident too, which is worse than
+          # not checking.
+          #
+          # DEFAULTS TO CLAUDE when there is no project file: that is the product's own
+          # compiled-in fallback, and a repository with no committed analysis is refused a
+          # few lines later for that reason instead — a better message than this one.
+          ENGINE=claudeCode
+          if [ -f .predictable-code/project.json ]; then
+            ENGINE=$(jq -r '.aiProvider.engine // "claudeCode"' .predictable-code/project.json 2>/dev/null || echo claudeCode)
+          fi
+          echo "Configured engine: ${ENGINE}"
+
+          # NOT SHIPPED, AND SAID BEFORE ANYTHING IS DOWNLOADED. The runtime package
+          # carries `claude` and `opencode`; this repository pins no `copilot` at all, so
+          # a run configured for it would install 3.9 GB and then fail on a missing
+          # binary. The remedy is the customer's and it is one command, so it is named.
+          if [ "${ENGINE}" = "copilotCli" ]; then
+            echo "::error::this repository is configured to use GitHub Copilot CLI, which the Predictable runtime package does not ship — a hosted fix cannot run it"
+            {
+              echo "### The configured engine is not available on a runner"
+              echo
+              echo 'This repository'"'"'s `.predictable-code/project.json` selects **GitHub Copilot CLI**. The runtime package this workflow installs ships `claude` and `opencode`, and no `copilot` — so a hosted fix has nothing to run.'
+              echo
+              echo 'Either switch the project to an engine the package ships (`predictable settings engine set claude <model>`, or `opencode`), or run the fix from your own machine where your `copilot` CLI is installed and signed in.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # ONLY CLAUDE'S KEY IS CHECKED HERE, and only for Claude. OpenCode's credential
+          # depends on the MODEL its provider config names (a Groq model wants
+          # `GROQ_API_KEY`, an Anthropic one wants `ANTHROPIC_API_KEY`), and this step
+          # cannot know which without reading a config it does not have. Demanding the
+          # wrong one would be a refusal the reader cannot act on; the run reports the
+          # real requirement itself.
+          if [ "${ENGINE}" != "claudeCode" ]; then
+            echo "Engine ${ENGINE} supplies its own credentials; not checking for an Anthropic key."
+            exit 0
+          fi
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "::error::a fix needs an ANTHROPIC_API_KEY secret this repository can see — set it on the repository, or on the organisation and share it with this repository (a secret named ORG_ANTHROPIC_KEY is also read)"
+            {
+              echo "### No model key"
+              echo
+              # SAYS BOTH PLACEMENTS. It used to say "add a repository secret", which is
+              # narrower than what the workflow reads: an organisation owner who had
+              # already set the key org-wide was told to add a second one per repository.
+              # A message that sends a reader to do redundant work is wrong even when the
+              # work would succeed.
+              echo 'A fix runs an agent on this runner, so it needs a model key that belongs to you. Set a secret named `ANTHROPIC_API_KEY` that this repository can see — either on the repository (Settings -> Secrets and variables -> Actions) or on the organisation, shared with this repository — and run the fix again. A secret named `ORG_ANTHROPIC_KEY` is read as well, so if your organisation already uses that name there is nothing to add.'
+              echo
+              echo 'ANALYSIS needs no key — only a fix does. The **verified fix** differs from the agent fix by re-analysing and discarding its own edit unless four accept gates hold, not by running without a model.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "A model key is configured."
+
+      - name: Fetch a short-lived download of the CLI
+        id: toolchain
+        env:
+          CONTROL_PLANE: ${{ inputs.control_plane }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PC_COMMAND: ${{ inputs.command }}
+        run: |
+          set -euo pipefail
+
+          # The audience is the control plane itself. GitHub mints a token for whatever
+          # audience is asked for, so naming it here is what stops this token being
+          # replayable at any other service.
+          OIDC=$(curl -sSf \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${CONTROL_PLANE}" | jq -r '.value')
+
+          # ONE helper for all six assets. A signed URL is a credential for the life of
+          # its signature, so it must never reach the command line, a log, or a step
+          # output: `-K` makes curl read it from a file, keeping it out of `ps` and out
+          # of any shell trace, and the file is deleted the moment it is consumed.
+          #
+          # `--fail-with-body` so a refusal is readable — the control plane explains
+          # itself in JSON, and a bare `-f` would discard exactly that.
+          LAST_RESPONSE=""
+          fetch() { # fetch <query> <destination>
+            local q="$1" dest="$2"
+            LAST_RESPONSE=$(curl -sS --fail-with-body \
+              -H "Authorization: Bearer ${OIDC}" \
+              "${CONTROL_PLANE}/api/cloud/toolchain?${q}&tag=${RELEASE_TAG}")
+            printf 'url = "%s"\n' "$(echo "${LAST_RESPONSE}" | jq -r '.url')" > /tmp/pc-curlrc
+            curl -sSfL -o "${dest}" -K /tmp/pc-curlrc || {
+              echo "::error::the signed download for ${q} failed or expired"
+              rm -f /tmp/pc-curlrc
+              exit 1
+            }
+            rm -f /tmp/pc-curlrc
+          }
+
+          # THE SAME LAYOUT `install.sh` PRODUCES, and that is the whole requirement:
+          # the launcher resolves the binary as `$PREDICTABLE_HOME/bin/predictable`, so
+          # a flat root here is an install the launcher correctly refuses to run
+          # ("no binary at .../bin/predictable; this install is incomplete"). A second
+          # layout would also be a second thing to keep in step with the launcher.
+          # OUTSIDE THE CHECKOUT, and that is not tidiness. Placed inside it, the
+          # install root is part of the project as far as any scan is concerned:
+          # `predictable init --accept-config-suggestions` walked it and reported
+          # Lean's own sources, z3's bundled python and node's docs as this
+          # repository's code paths, turning a 400-file project into 20,775 files to
+          # translate. `$RUNNER_TEMP` is on the same filesystem and outside the tree.
+          UNPACK="${RUNNER_TEMP}/predictable-pkg"
+          mkdir -p "$UNPACK"
+
+          # THE RUNTIME PACKAGE, NOT A BARE BINARY.
+          #
+          # A bare `predictable` can analyse Java and nothing else: the TypeScript front
+          # end is a binary PLUS `typescript-tsc/dist/emit.js` and a
+          # `node_modules/typescript` tree, which is a directory and can never be an
+          # individual release asset. Measured on the first customer-shaped run — the
+          # job installed the binary, provisioned a toolchain successfully, and then
+          # died at `predictable_typescript_direct binary not found next to
+          # predictable` having translated nothing.
+          #
+          # WHAT THE PACKAGE CARRIES, AND WHAT IT DOES NOT. It carries what we BUILD: the
+          # binaries, the front ends, and the compiled artefacts a generated verification
+          # project imports. It does NOT carry the Lean toolchain, z3 or node — since
+          # #1863 those are fetched from their pinned URLs and checksums by the
+          # provisioning step below, which took the customer download from 1.2 GB to
+          # 229 MiB. `make test-bundle-install` proves the package half of that shape:
+          # unpacked where it was not built, system PATH only, analysing a real project.
+          #
+          # THIS PARAGRAPH USED TO SAY THE OPPOSITE — that the package carried the
+          # toolchain "so there is no separate provisioning step" — and that is exactly
+          # the premise `cfeb78159` acted on when it DELETED the provisioning step. The
+          # step's own comment below records what that cost: "without this the hosted run
+          # dies on its first command". The claim is corrected here rather than only
+          # there, because a reader who believes this one will delete that step again.
+          # THE PLATFORM IS DERIVED, NOT ASSUMED. This said `platform=linux-x64`, while the
+          # `runner` input above is one we INVITE the customer to change — its own description is
+          # "A large repository needs more memory than the standard runner has", and the
+          # out-of-memory summary this workflow prints tells them to do exactly that. Follow that
+          # advice onto a macOS runner and the job downloaded Linux binaries: the shape check below
+          # still PASSES, because `bin/predictable` exists and is executable, so the failure
+          # surfaced much later as an exec format error with nothing pointing back here.
+          #
+          # The same three cases `install.sh`'s `detect_platform` resolves, and the same refusal for
+          # anything else — a release publishes darwin-arm64, darwin-x64 and linux-x64 and nothing
+          # more, so an arm64 Linux runner is told so by name rather than handed an archive that
+          # cannot run.
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  PC_PLATFORM=linux-x64 ;;
+            Darwin-arm64)  PC_PLATFORM=darwin-arm64 ;;
+            Darwin-x86_64) PC_PLATFORM=darwin-x64 ;;
+            *)
+              echo "::error::no Predictable Code package is published for $(uname -s)/$(uname -m); this workflow's \`runner\` must be a linux-x64, darwin-arm64 or darwin-x64 machine"
+              exit 1
+              ;;
+          esac
+          echo "Installing the ${PC_PLATFORM} package on $(uname -s)/$(uname -m)."
+          fetch "platform=${PC_PLATFORM}&kind=runtime" "${RUNNER_TEMP}/predictable-runtime.tar.gz"
+          # Read off the response we already have, rather than a second call that would
+          # mint a signed URL nobody downloads.
+          echo "tag=$(echo "${LAST_RESPONSE}" | jq -r '.tag')" >> "$GITHUB_OUTPUT"
+          echo "schema_hash=$(echo "${LAST_RESPONSE}" | jq -r '.schemaHash // ""')" >> "$GITHUB_OUTPUT"
+
+          tar -xzf "${RUNNER_TEMP}/predictable-runtime.tar.gz" -C "$UNPACK"
+          rm -f "${RUNNER_TEMP}/predictable-runtime.tar.gz"
+
+          # The archive holds ONE `predictable-runtime-*` directory, and that directory
+          # is the install root — the same layout `install.sh` produces, which is what
+          # `launcher.sh` inside it resolves against.
+          set -- "$UNPACK"/predictable-runtime-*/
+          PC_HOME="${1%/}"
+          [ -x "$PC_HOME/bin/predictable" ] || {
+            echo "::error::the runtime package holds no bin/predictable; this release cannot analyse"
+            exit 1
+          }
+
+          echo "predictable_home=$PC_HOME" >> "$GITHUB_OUTPUT"
+
+          # WHERE THE PLUGIN'S OWN WRAPPER LOOKS FOR THE CLI, which is not where we just
+          # put it — and until this line, on a runner, it never found it.
+          #
+          # MEASURED on the v21 run of this very workflow. The plugin ships a `bin/predictable`
+          # wrapper that every hook and the `sync` skill invoke, and it resolves
+          # `${CLAUDE_PLUGIN_DATA:-${PLUGIN_DATA:-$HOME/.predictable-code-runtime}}/runtime/bin/predictable`
+          # first, falling back to a `predictable` on PATH. On a runner NEITHER hits: we unpack
+          # to `$RUNNER_TEMP`, not `$HOME/.predictable-code-runtime`, and the package's own `bin`
+          # is deliberately kept off PATH (see the `--pinned` note below — putting it on PATH
+          # would let `resolveUserClaude` find our bundled agent under the user's name). So the
+          # wrapper printed `no runtime bundle in /home/runner/.predictable-code-runtime/runtime
+          # and no predictable on PATH` and exited 127, three times, in a run that went GREEN.
+          #
+          # WHAT THAT COST, and it is the whole point of loading the plugin at all: the
+          # SessionStart hook could not start the background sync, so the agent worked with no
+          # findings, no requirements and no way to check its own change. It said so plainly —
+          # "I started the sync, but it can't run in this environment" — and the run still
+          # settled successfully, because an agent declining is a legitimate outcome and
+          # nothing downstream could tell that one apart from a considered refusal.
+          #
+          # A SYMLINK AND A VARIABLE, rather than exporting PATH: the wrapper primes PATH,
+          # `LEAN_SYSROOT` and `LEAN_PATH` itself, exactly as `launcher.sh` does, and it does so
+          # INSIDE its own process — so the bundled agent never reaches the PATH this workflow's
+          # own `predictable claude` resolves against, and the rule above is kept.
+          ln -sfn "$PC_HOME" "$UNPACK/runtime"
+          echo "plugin_data=$UNPACK" >> "$GITHUB_OUTPUT"
+
+          # RESTORED TO THIS STEP, and the move out of it was the whole defect. This block
+          # reads `PC_COMMAND`, `OIDC` and `CONTROL_PLANE`: the first two are this step's own
+          # (`env:` above and a shell local), and step state does not cross steps — so from
+          # the provisioning step it ran under `set -euo pipefail` against an unset
+          # `PC_COMMAND` and exited 1 on the FIRST line it reached, for every command, not
+          # only `fix-agent`. It also wrote `plugin_dir` into a step with no `id:` while the
+          # consumer reads `steps.toolchain.outputs.plugin_dir`, so even a fixed environment
+          # would have handed the agent an empty plugin directory.
+          # THE CLAUDE PLUGIN, and only for the verb that needs it.
+          #
+          # `predictable claude` normally provisions its plugin directory by shallow-
+          # cloning our plugin repository — which is PRIVATE, so this runner's
+          # `GITHUB_TOKEN` cannot read it and the clone would fail AFTER the download
+          # above, the most expensive possible place to find out. The control plane
+          # hands over a short-lived, credential-free URL instead, exactly as it does
+          # for the runtime package.
+          #
+          # OUTSIDE THE CHECKOUT, which is not tidiness: the CLI's own default cache is
+          # `.predictable-code/claude-plugin`, and the fix branch stages SOURCE with
+          # `git add -A` — so a plugin unpacked in the tree would be committed into the
+          # customer's pull request. `PREDICTABLE_CLAUDE_PLUGIN_DIR` is what stops the
+          # clone happening at all.
+          if [ "${PC_COMMAND}" = "fix-agent" ]; then
+            PLUGIN_ROOT="${RUNNER_TEMP}/predictable-plugin"
+            mkdir -p "$PLUGIN_ROOT"
+            PLUGIN_RESPONSE=$(curl -sS --fail-with-body \
+              -H "Authorization: Bearer ${OIDC}" "${CONTROL_PLANE}/api/cloud/plugin")
+            printf 'url = "%s"\n' "$(echo "${PLUGIN_RESPONSE}" | jq -r '.url')" > /tmp/pc-curlrc
+            curl -sSfL -o "${RUNNER_TEMP}/pc-plugin.tar.gz" -K /tmp/pc-curlrc || {
+              echo "::error::the signed download for the Claude plugin failed or expired"
+              rm -f /tmp/pc-curlrc
+              exit 1
+            }
+            rm -f /tmp/pc-curlrc
+            # GitHub's tarball wraps everything in one `<owner>-<repo>-<sha>/`
+            # directory, so it is stripped: `--plugin-dir` is handed the directory that
+            # CONTAINS `.claude-plugin/plugin.json`, not its parent.
+            tar -xzf "${RUNNER_TEMP}/pc-plugin.tar.gz" -C "$PLUGIN_ROOT" --strip-components=1
+            rm -f "${RUNNER_TEMP}/pc-plugin.tar.gz"
+            [ -f "$PLUGIN_ROOT/.claude-plugin/plugin.json" ] || {
+              echo "::error::the plugin download holds no .claude-plugin/plugin.json"
+              exit 1
+            }
+            echo "plugin_dir=$PLUGIN_ROOT" >> "$GITHUB_OUTPUT"
+            echo "Installed the Claude plugin"
+          fi
+
+          echo "Installed the runtime package from ${RELEASE_TAG}"
+
+      # THE PACKAGE NO LONGER CARRIES THE TOOLCHAIN, so this step is back.
+      #
+      # It was removed in `cfeb78159` on the stated premise that the package carried `base`.
+      # That premise is gone: since #1863 the release ships what WE build and a provisioning
+      # record — `mise.toml`, `mise.lock`, `provision.sh` — and Lean, z3 and node are fetched
+      # here from their pinned URLs and checksums. The customer download went 1.2 GB to
+      # 229 MiB for the same reason. Without this the hosted run dies on its first command.
+      #
+      # IT ALSO PUTS THE AGENT BACK. `group_base` includes `aqua:anthropics/claude-code` and
+      # `links()` maps it to `bin/claude` — beside `bin/predictable`, which is exactly where
+      # `--pinned` looks (`resolvePinnedClaude` reads `(← IO.appPath).parent`). So the same
+      # step that fixes `sync` is what makes the agent fix resolvable again; without it
+      # `--pinned` selects a copy that stopped shipping with #1868.
+      #
+      # `base` ONLY — a language group is fetched the first time a project needs one, so a
+      # TypeScript repository does not pay for a JDK.
+      - name: Provision the pinned toolchain
+        env:
+          PC_HOME: ${{ steps.toolchain.outputs.predictable_home }}
+        run: |
+          set -euo pipefail
+          PREDICTABLE_HOME="$PC_HOME" "$PC_HOME/provision.sh" install base
+
+      - name: Clear state written by a different build
+        # SYNC ONLY. A fix reads the analysis that found the finding — clearing it would
+        # leave `fix-issue` nothing to resolve the id against, and the run would fail
+        # with "no such finding" on a repository whose finding is right there.
+        if: inputs.command == 'sync'
+        env:
+          EXPECTED: ${{ steps.toolchain.outputs.schema_hash }}
+        run: |
+          set -euo pipefail
+          STATE=.predictable-code
+          [ -d "$STATE" ] || { echo "No committed state; this is a first analysis."; exit 0; }
+
+          FOUND=""
+          [ -f "$STATE/schema-hash" ] && FOUND=$(tr -d '[:space:]' < "$STATE/schema-hash")
+
+          # Cleared rather than reconciled, and never silently: there is nobody to
+          # prompt in CI, so the desktop tool's drift dialogue has no analogue here. An
+          # UNKNOWN expected stamp also clears — discarding reuse costs time, and
+          # reporting an old build's dataset as current costs trust.
+          if [ -n "$EXPECTED" ] && [ "$FOUND" = "$EXPECTED" ]; then
+            echo "Committed state was written by this build ($FOUND); keeping it for reuse."
+          else
+            echo "::notice::Replacing committed state: found '${FOUND:-none}', expected '${EXPECTED:-unknown}'."
+            rm -rf "$STATE"
+          fi
+
+      - name: Run
+        id: analyse
+        env:
+          PC_HOME: ${{ steps.toolchain.outputs.predictable_home }}
+          CONTROL_PLANE: ${{ inputs.control_plane }}
+          PC_COMMAND: ${{ inputs.command }}
+          # Through the ENVIRONMENT, never interpolated into the script. A
+          # `${{ inputs.target }}` spliced into shell is an injection site, and this
+          # input reaches us from an API call. The PROMPT is free-form prose and is the
+          # most important of the three to keep out of the script text.
+          PC_TARGET: ${{ inputs.target }}
+          PC_PROMPT: ${{ inputs.prompt }}
+          # Where the plugin was unpacked. Set for every verb and used by one: the CLI
+          # reads it instead of cloning, and an empty value simply means the CLI's own
+          # default applies, which is right for the verbs that never launch an agent.
+          PREDICTABLE_CLAUDE_PLUGIN_DIR: ${{ steps.toolchain.outputs.plugin_dir }}
+          # What makes the plugin's `bin/predictable` wrapper resolve — see the symlink in the
+          # toolchain step. Without it every hook in a dispatched agent fix exits 127 and the
+          # agent runs blind, in a job that still reports success.
+          PLUGIN_DATA: ${{ steps.toolchain.outputs.plugin_data }}
+          # The same closed pair as the preflight above, and it must STAY the same pair:
+          # a preflight that accepts a key the run step cannot see passes a check and then
+          # spawns an agent with an empty key, which is the failure this file already
+          # records having shipped once.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.ORG_ANTHROPIC_KEY }}
+          # Empty is NOT the same as unset for this knob: the product reads the variable
+          # and an empty string is not a number, so it falls back to measured headroom —
+          # which is what an empty input should mean.
+          PREDICTABLE_TS_FRONTEND_HEAP_MB: ${{ inputs.heap_mb }}
+        run: |
+          set -euo pipefail
+          # THE LAUNCHER, never the binary directly. `launcher.sh` is what puts the
+          # provisioned toolchain on PATH — running the raw binary is how a `lake` or a
+          # `lean` spawn resolves to whatever the runner had, or to nothing.
+          predictable() { PREDICTABLE_HOME="$PC_HOME" "$PC_HOME/launcher.sh" "$@"; }
+          # SYNC ONLY, for the same reason the clearing step is: a fix runs against the
+          # configuration that produced the finding, and re-detecting source paths
+          # underneath it would change what the analysis was about.
+          if [ "${PC_COMMAND}" = "sync" ] && [ ! -f .predictable-code/project.json ]; then
+            # Headless configuration: scans the tree and populates source paths and
+            # extensions itself, because there is no one here to answer prompts.
+            predictable init "${GITHUB_REPOSITORY##*/}" \
+              --path "$PWD/.predictable-code" --accept-config-suggestions
+          fi
+
+          # ──────────────────────────────────────────────────────────────────────────
+          # REPORTING PROGRESS WHILE IT HAPPENS, not after.
+          #
+          # `predictable sync --json` emits the same `{"event":"phase",…}` stream a local
+          # sync does, and the Control Center renders a progress bar, a phase list and a
+          # live feed from exactly those lines. The control plane USED to scrape them
+          # back out of the Actions log, which cannot work: that log is an Azure blob
+          # that answers `404 BlobNotFound` until the job COMPLETES — measured against a
+          # live run 36 minutes into this step. So the reader watched a spinner for an
+          # hour and got the whole feed at the end.
+          #
+          # This pushes instead. The batch is whatever is new since the last push, sent
+          # as text to `/api/cloud/progress` and authenticated by this job's own OIDC
+          # token, so the control plane knows which run it is from a SIGNED claim rather
+          # than from anything this script could assert about itself.
+          #
+          # EVERY PUSH IS BEST-EFFORT AND CANNOT FAIL THE ANALYSIS (`|| true`, and a
+          # bounded `-m`). The work is happening either way; a status bar is not a reason
+          # to fail a run that is analysing the repository perfectly well.
+          # ──────────────────────────────────────────────────────────────────────────
+          PROGRESS_SENT=0
+          AGENT_SENT=0
+          PUSH_SENT=0
+          OIDC_MINTED=0
+          PC_OIDC=""
+          # OUTSIDE THE CHECKOUT, for the reason the runtime package is: anything we
+          # write into the tree is part of the tree as far as git is concerned. Measured
+          # on this exact path — the run's ndjson was written into the working
+          # directory, and the fix step's `git add -A` (which must stage SOURCE, so it
+          # cannot be scoped the way the analysis step's `git add -Af .predictable-code`
+          # is) committed our own scratch file into the customer's pull request.
+          # TWO STREAMS, BECAUSE THE PRODUCT USES TWO, and getting this wrong is why
+          # the first hosted run reported no progress at all.
+          #
+          # `ProgressEvent.emit` writes its NDJSON to **stderr** — "stdout stays
+          # reserved for a verb's result envelope", and the desktop app's own
+          # `JobRunner.consume` parses stderr line by line. This captured stdout, so the
+          # push loop below watched a file that stays empty until the verb finishes and
+          # writes its envelope: every phase went to the Actions log instead, which is
+          # exactly the scrape-at-the-end behaviour the push exists to replace.
+          RUN_JSON="${RUNNER_TEMP}/predictable-progress.ndjson"
+          RESULT_JSON="${RUNNER_TEMP}/predictable-result.json"
+          # A THIRD FILE, FOR THE ONE VERB WHOSE STDOUT IS PROGRESS RATHER THAN A RESULT.
+          # `predictable claude --stream-json` inherits stdio and Claude writes one JSON
+          # message per turn to stdout, so for `fix-agent` that stream is the live account
+          # of what the agent is doing — and it is what the app renders locally. It cannot
+          # share `$RESULT_JSON`: nothing pushes that file, which is exactly how a hosted
+          # fix came to show a run that did nothing and then ended.
+          AGENT_JSON="${RUNNER_TEMP}/predictable-agent.ndjson"
+
+          mint_oidc() {
+            # RE-MINTED ON A CLOCK, because an Actions ID token is short-lived and a sync
+            # is not: a token taken once at the top of this step is expired long before a
+            # large repository finishes, and every push after that would be refused.
+            now=$(date +%s)
+            if [ -n "$PC_OIDC" ] && [ $((now - OIDC_MINTED)) -lt 240 ]; then return 0; fi
+            PC_OIDC=$(curl -sS -m 20 \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${CONTROL_PLANE}" \
+              | jq -r '.value // empty') || PC_OIDC=""
+            OIDC_MINTED=$now
+          }
+
+          # PUSH ONE FILE, SAYING WHICH STREAM IT IS, and echo the new sent-count.
+          #
+          # WHY THE STREAM TRAVELS WITH THE BYTES. The control plane feeds every pushed
+          # line into the same `consume` a local run uses, and `consume` reads the two
+          # streams differently ON PURPOSE: phases are parsed from STDERR (the product
+          # emits its NDJSON there) and the AGENT's own stream-json — tool calls, denied
+          # tools, the terminal result — is parsed from STDOUT. So a channel that
+          # flattened everything to one stream could carry an analysis or an agent fix,
+          # never both.
+          #
+          # MEASURED, which is why this changed: an agent fix pushed only stderr, so the
+          # agent's work never left the runner and the app showed a run that did nothing
+          # for the few seconds before it ended. Locally the same fix shows every tool
+          # call, because the local pump feeds stdout to the same parser.
+          #
+          # IT ANSWERS IN A GLOBAL (`PUSH_SENT`) RATHER THAN ON STDOUT, so that no caller
+          # needs a command substitution. MEASURED, in the test harness that caught it:
+          # `$(push_stream …)` is a SUBSHELL, so `mint_oidc`'s assignments to `PC_OIDC`
+          # and `OIDC_MINTED` die with it — the four-minute token cache becomes dead code
+          # and a forty-minute sync mints a fresh ID token every three seconds. Answering
+          # in a variable keeps every call in this shell, which is also why the
+          # diagnostics below can stay on stdout, where the job log is.
+          push_stream() {
+            _file=$1; _stream=$2; _sent=$3
+            PUSH_SENT=$_sent
+            [ -f "$_file" ] || return 0
+            total=$(wc -l < "$_file" | tr -d ' ')
+            [ "$total" -gt "$_sent" ] || return 0
+            mint_oidc
+            [ -n "$PC_OIDC" ] || return 0
+            # The token is a credential, so it goes in a header from a variable and never
+            # onto a command line that `ps` or a shell trace could read.
+            tail -n "+$((_sent + 1))" "$_file" | head -n "$((total - _sent))" \
+              > "${RUNNER_TEMP}/pc-batch.ndjson"
+            # A BACKLOG THE CONTROL PLANE WOULD REFUSE IS TRIMMED HERE, AND SAID OUT LOUD.
+            # Its ingest bounds a body at 1 MB and answers 413. A batch that big can only
+            # arrive after several failed pushes, and re-sending it forever would mean the
+            # feed never resumes — so the oldest lines are dropped, which is a LOSS and is
+            # therefore announced. The whole output is still in this job's log either way.
+            # `tail -c` can cut mid-line, so the partial first line goes with it.
+            bytes=$(wc -c < "${RUNNER_TEMP}/pc-batch.ndjson" | tr -d ' ')
+            if [ "$bytes" -gt 900000 ]; then
+              echo "::warning::the progress backlog reached ${bytes} bytes, more than the app accepts in one push; its oldest lines are being dropped from the live feed — this job's log still holds all of them"
+              tail -c 900000 "${RUNNER_TEMP}/pc-batch.ndjson" | tail -n +2 \
+                > "${RUNNER_TEMP}/pc-batch-trimmed.ndjson"
+              mv "${RUNNER_TEMP}/pc-batch-trimmed.ndjson" "${RUNNER_TEMP}/pc-batch.ndjson"
+            fi
+            # ADVANCED ONLY ON SUCCESS. It used to advance unconditionally, so one refused
+            # or dropped push lost those lines from the app for good — while the file that
+            # still held them sat right there, and the next poll would have re-sent them
+            # for nothing. A failure now simply leaves them pending, and the batch that
+            # grows out of repeated failures is bounded by the trim above.
+            if curl -sS -m 30 -o /dev/null \
+              -H "Authorization: Bearer ${PC_OIDC}" \
+              -H 'content-type: text/plain' \
+              --data-binary "@${RUNNER_TEMP}/pc-batch.ndjson" \
+              "${CONTROL_PLANE}/api/cloud/progress?stream=${_stream}"; then
+              PUSH_SENT=$total
+            fi
+            rm -f "${RUNNER_TEMP}/pc-batch.ndjson"
+          }
+
+          # BOTH STREAMS, each as itself. `AGENT_JSON` is written by the agent verb alone;
+          # for every other one the second call finds an empty file and does nothing.
+          push_progress() {
+            push_stream "$RUN_JSON" stderr "$PROGRESS_SENT"
+            PROGRESS_SENT=$PUSH_SENT
+            push_stream "$AGENT_JSON" stdout "$AGENT_SENT"
+            AGENT_SENT=$PUSH_SENT
+          }
+
+          : > "$RUN_JSON"
+          : > "$RESULT_JSON"
+          : > "$AGENT_JSON"
+          # ONE SPAWN, CHOSEN HERE. Both verbs emit the same `{"event":…}` stream on
+          # stdout and both are followed by the same pump below, so the difference
+          # between them is an argv and nothing else.
+          if [ "${PC_COMMAND}" != "sync" ]; then
+            [ -n "${PC_TARGET}" ] || {
+              echo "::error::${PC_COMMAND} needs a target finding"
+              exit 1
+            }
+            [ -f .predictable-code/project.json ] || {
+              # NAMED, because the remedy is a different button. A repository with no
+              # committed analysis has nothing to fix, and "no such finding" would send
+              # the reader looking for a typo in an id that was never the problem.
+              echo "::error::this repository has no committed analysis; run an analysis and merge its pull request first"
+              exit 1
+            }
+          fi
+          if [ "${PC_COMMAND}" = "fix-agent" ]; then
+            [ -n "${PC_PROMPT}" ] || {
+              # The prompt is BUILT BY THE CONTROL PLANE from the finding's own fields,
+              # so an empty one means the dispatch was malformed, not that the agent has
+              # nothing to do — and running an agent with an empty prompt in a
+              # `bypassPermissions` session is the last thing to do about it.
+              echo "::error::command=fix-agent needs a prompt"
+              exit 1
+            }
+            # `--pinned` IS REQUIRED HERE, and its absence is why the first hosted agent
+            # fix that got past the segfault still ran nothing:
+            #
+            #     could not execute external process 'claude'
+            #     claude exited with code 255
+            #
+            # `predictable claude` defaults to the USER's own Claude Code — their version,
+            # auth, MCP — and `resolveUserClaude` DELIBERATELY skips the copy bundled beside
+            # the running binary, so a developer's launcher never silently runs ours under
+            # the name of theirs. That is right at a terminal and wrong on a runner, where
+            # there is no user install at all: the lookup falls through to a bare `claude`
+            # that PATH cannot resolve, because the package's own `bin` is deliberately not
+            # on PATH either.
+            #
+            # On this machine the pinned copy is the ONLY Claude, and it is the build this
+            # release is tested against. It is NO LONGER IN THE TARBALL — #1868 stopped
+            # redistributing the agent CLIs, because nothing in Claude Code's terms grants us
+            # the right — so it arrives the way every other pinned tool now does: the
+            # `Provision the pinned toolchain` step above runs `provision.sh install base`,
+            # `group_base` names `aqua:anthropics/claude-code`, and `links()` puts it at
+            # `bin/claude` beside `bin/predictable`. That is precisely where `--pinned` looks,
+            # so the flag still selects it and still errors plainly if it is absent rather than
+            # falling back to a different agent than we asked for.
+            #
+            # `--stream-json` so the agent's own work arrives as ndjson, one message per
+            # turn and per tool call, and is pushed by the same pump below.
+            #
+            # STDOUT GOES TO `$AGENT_JSON`, WHICH IS PUSHED. This verb is the exception to
+            # "stdout is the result envelope": `predictable claude` spawns the CLI with
+            # stdio INHERITED, so what lands on this process's stdout is Claude's own
+            # stream — and the app's `consume` parses exactly that, from stdout, to show
+            # tool calls while a fix is still running. Sending it to `$RESULT_JSON`, which
+            # no pump reads, is why the hosted fix showed nothing; the envelope is not
+            # read for a fix anyway (the verdict comes from the TREE, below).
+            predictable claude \
+              --prompt "${PC_PROMPT}" \
+              --pinned \
+              --stream-json \
+              --permission-mode bypassPermissions \
+              --path "$PWD/.predictable-code" > "$AGENT_JSON" 2> "$RUN_JSON" &
+          elif [ "${PC_COMMAND}" = "fix" ]; then
+            predictable analyze fix-issue "${PC_TARGET}" \
+              --path "$PWD/.predictable-code" --json > "$RESULT_JSON" 2> "$RUN_JSON" &
+          else
+            predictable sync --path "$PWD/.predictable-code" --json \
+              > "$RESULT_JSON" 2> "$RUN_JSON" &
+          fi
+          SYNC_PID=$!
+          # `kill -0` rather than a `pgrep` pattern: this repo has already been bitten by
+          # a waiter whose pattern matched its own command line and never terminated.
+          while kill -0 "$SYNC_PID" 2>/dev/null; do
+            sleep 3
+            push_progress
+          done
+          # THE EXIT STATUS IS KEPT, and exactly one thing is done with it.
+          #
+          # An ordinary non-zero exit is still not acted on: the VERDICT below decides
+          # whether an analysis is usable, and a fix that declines its own accept gates
+          # is a real and ordinary outcome, not a failure. That reasoning is unchanged.
+          #
+          # A DEATH BY SIGNAL IS NOT THAT, and it was being reported as if it were.
+          # MEASURED on a hosted agent fix: `predictable claude` took SIGSEGV before
+          # reading a word of its prompt, `|| true` swallowed it, and the job exited 0
+          # with `result=fix-agent` — the same thing it reports for a fix that ran fine
+          # and chose to change nothing. The reader was told their defect needed a
+          # different remedy; what actually happened is that the agent never started.
+          #
+          # No legitimate outcome of these verbs is a signal death, so this is a crash
+          # and is reported as one.
+          wait "$SYNC_PID" && RUN_STATUS=0 || RUN_STATUS=$?
+          # The tail: phases written between the last poll and the process exiting are
+          # the ones naming the outcome, and losing them loses the answer.
+          push_progress
+
+          # AND BACK INTO THIS LOG, because redirecting stderr to a file took it out of
+          # one. Before the split, `predictable`'s progress went to the job log and the
+          # control plane scraped it; now it goes to `$RUN_JSON` and is pushed — which
+          # is what makes it live, and also what made the customer's OWN log stop
+          # carrying it. Measured on a real run: the job log held ZERO progress events,
+          # its only match being this comment.
+          #
+          # That matters twice. A push is best-effort, so a network failure would have
+          # left the phases in NEITHER place; and the Actions log is where a customer
+          # debugs their own run, with no account of ours to consult.
+          #
+          # Appended after the fact rather than tee'd: a `tee` through process
+          # substitution reorders against the step's other output and can lose the tail
+          # when the shell exits, and the ordering here is not worth that risk — the
+          # live copy is the pushed one.
+          if [ -s "$RUN_JSON" ]; then
+            echo "::group::Progress events ($(wc -l < "$RUN_JSON" | tr -d ' ') lines)"
+            cat "$RUN_JSON"
+            echo "::endgroup::"
+          fi
+          # THE AGENT'S STREAM, for the same reason and with the same caveat: a push is
+          # best-effort, and this is the customer's own record of what the agent did.
+          if [ -s "$AGENT_JSON" ]; then
+            echo "::group::Agent stream ($(wc -l < "$AGENT_JSON" | tr -d ' ') lines)"
+            cat "$AGENT_JSON"
+            echo "::endgroup::"
+          fi
+
+          # A CRASH IS REPORTED AS A CRASH, before anything downstream reads a tree the
+          # dead process may have left half-written. `128 + N` is the shell's encoding of
+          # "killed by signal N"; 139 is SIGSEGV, which is the one this was written for.
+          #
+          # It FAILS THE JOB deliberately. Every alternative lies in the reader's favour:
+          # exiting 0 publishes a pull request from a tree nobody finished writing, and
+          # the app's own honest "unverified" line still leaves them looking for a reason
+          # in their code. A red job with this sentence is the only outcome that says what
+          # happened.
+          if [ "$RUN_STATUS" -gt 128 ]; then
+            SIG=$((RUN_STATUS - 128))
+            echo "::error::${PC_COMMAND} was killed by signal ${SIG} (exit ${RUN_STATUS}) — this is a crash, not a run that chose to change nothing, so nothing it may have written is trusted"
+            {
+              echo "### The run crashed"
+              echo
+              echo "\`${PC_COMMAND}\` was killed by **signal ${SIG}** (exit ${RUN_STATUS}). That is a crash of the tool, **not** a finding about your code and not a fix that declined — so no pull request is opened and whatever it had written is left alone."
+              echo
+              echo "The output above is everything it managed to report before it died."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # AN AGENT THAT NEVER RAN IS NOT A FIX THAT DECLINED, and only the agent verb can
+          # tell the two apart by its exit status.
+          #
+          # The rule above — "an ordinary non-zero exit is not acted on" — is right for
+          # `fix-issue` and for `sync`: `fix-issue` has accept gates and restoring its snapshot
+          # is an ordinary outcome, and a partial sync is still a usable analysis. `predictable
+          # claude` has no accept gates. It either launches the agent or it does not, so a
+          # non-zero exit from it means the run produced nothing, for a reason that is ours.
+          #
+          # MEASURED on run 35879959641, which reported SUCCESS: `predictable claude --pinned`
+          # found no pinned Claude ("No pinned Claude ships with this build"), threw, exited
+          # non-zero — and this step swallowed it, so the empty tree downstream was announced as
+          # "the fix did not change any source; nothing to propose". That is the sentence a
+          # reader gets when an agent considered their defect and declined, and the agent had not
+          # started. The crash arm above was written for exactly this shape and catches only
+          # signal deaths; this is the same lie arriving through an ordinary exit code.
+          if [ "${PC_COMMAND}" = "fix-agent" ] && [ "$RUN_STATUS" -ne 0 ]; then
+            echo "::error::the agent did not run (exit ${RUN_STATUS}) — this is not a fix that chose to change nothing, and the output above says why"
+            {
+              echo "### The agent did not run"
+              echo
+              echo "\`predictable claude\` exited **${RUN_STATUS}** without completing. That is a failure to start or to finish the agent, **not** a decision about your code — so no pull request is opened and the finding stands untouched."
+              echo
+              echo "The most common cause is a toolchain this workflow did not provision: the package ships no agent CLI, so \`provision.sh install base\` has to install one first. The output above names what it could not find."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # THE ONE OUTCOME THAT LOOKS LIKE A DEFECT IN THE CUSTOMER'S CODE AND IS NOT.
+          #
+          # MEASURED: a 1,213-file TypeScript repository on the standard runner (2 cores,
+          # 7 GB) exhausted the tsc front end's 3,374 MB V8 old-space budget. TypeScript
+          # was then reported as not translated, so the analysis had nothing to read, and
+          # everything downstream followed — no datasets, and an app that says "not
+          # analyzed" about a repository it had just spent forty minutes on.
+          #
+          # The engine already names its own remedy, on STDERR. That used to reach the
+          # job log; since the progress split it reaches `$RUN_JSON`, is pushed to the
+          # control plane as one progress line among hundreds, and is echoed back into
+          # the group above where nobody scrolling a green run will find it. The reader's
+          # account of the run — the verdict, the step summary, the pull request — says
+          # `degraded`, which is true and does not say WHY.
+          #
+          # So it is lifted to an annotation and a summary, where a degraded verdict is
+          # explained rather than merely stated.
+          #
+          # WHICH REMEDY DEPENDS ON THE BUDGET THAT DIED, and the first version of this
+          # block got that backwards. `nodeFrontEndHeapMbFor` is
+          # `min 4096 (max (h/2) (h-1024))`, pinned by `#guard`s: a standard GitHub runner
+          # (~6.7 GB of headroom) derives 4096, and so does a 64 GB machine — the
+          # `#guard nodeFrontEndHeapMbFor 65536 == 4096` says it outright. So above about
+          # 5 GB THE CEILING BINDS AND A BIGGER RUNNER CHANGES THE BUDGET BY NOTHING, and
+          # telling a reader whose 4096 MB budget was exhausted to rent a larger machine
+          # sends them to spend money on an identical result.
+          #
+          # Below the ceiling the opposite holds: the budget followed a small machine down,
+          # and memory is exactly the lever.
+          #
+          # The ceiling itself is measured and deliberate — 8192 MB bought no time and
+          # 1.3 GB more resident memory on this corpus — so raising `heap_mb` past it is a
+          # considered override, not a default, and it needs a machine that can hold it:
+          # V8's RSS runs above its own old-space cap, so a cap near the machine's size
+          # trades this clean error for the kernel killing the process.
+          # WHY THIS RUN COVERED LESS, WRITTEN ONCE AND RENDERED TWICE. The step summary below is
+          # read by somebody looking at THIS run; the pull request the next step opens outlives it
+          # and is what a reviewer sees. Both need the same answer, and computing it twice would be
+          # two producers of one fact — the shape this branch keeps finding. So it is extracted
+          # here, beside the data, and the propose step renders the file.
+          WHY_FILE="${RUNNER_TEMP}/pc-degraded-why.txt"
+          : > "$WHY_FILE"
+          HEAP_EXPLAINED=no
+          if grep -q "exhausted its" "$RUN_JSON" 2>/dev/null; then
+            HEAP_EXPLAINED=yes
+            BUDGET=$(grep -o "exhausted its [0-9]* MB" "$RUN_JSON" | head -1 | tr -cd '0-9')
+            printf 'The TypeScript front end exhausted its %s MB V8 old-space budget on this runner, so TypeScript is reported as not translated.\n' "${BUDGET:-derived}" > "$WHY_FILE"
+            echo "::warning::the TypeScript front end ran out of memory (${BUDGET:-its} MB V8 old-space budget), so TypeScript is reported as not translated and this analysis covers less than the project"
+            {
+              echo "### TypeScript did not translate: the front end ran out of memory"
+              echo
+              echo "The tsc front end exhausted its **${BUDGET:-derived} MB** V8 old-space budget on this runner, so TypeScript is reported as not translated and everything downstream of it — analysis, inferred requirements, the datasets this app reads — covers less than your project. **Nothing here says your code is wrong.**"
+              echo
+              if [ -n "${BUDGET}" ] && [ "${BUDGET}" -lt 4096 ]; then
+                echo 'This budget is **below the 4096 MB ceiling**, which means it was sized down to fit this machine. Run this workflow again with a `runner` that has more memory and the budget rises with it, up to that ceiling — no other change needed.'
+              else
+                echo 'This budget is **at the 4096 MB ceiling**, so a bigger `runner` alone will not change it: the budget is `min 4096 (max (headroom/2) (headroom - 1024))`, and every machine from a standard runner upwards derives the same 4096. To go further you must raise `heap_mb` explicitly **and** run on a machine large enough to hold it — V8 uses more resident memory than its own cap, so a cap near the size of the machine trades this clean error for the kernel killing the process. The ceiling is deliberate: 8192 MB was measured to buy no time and 1.3 GB more resident memory.'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # A SYNC REPORTS ITS VERDICT, NOT ITS EXIT CODE. `degraded` (only part of the
+          # project translated) and `mechanical` (stopped before proving) both exit 0,
+          # so reading the exit status alone reports a partial analysis as a clean one.
+          # THE VERDICT IS THE SINGLE KEY OF `result`, not `result` itself.
+          #
+          # `SyncResponse` is an inductive — `inSync`, `mechanical`, `degraded`,
+          # `verificationError` and the rest — so `.result` serialises as an OBJECT and
+          # `jq -r '.result'` prints the whole thing across many lines. A multi-line
+          # value written as `result=…` into `$GITHUB_OUTPUT` is malformed, so the
+          # propose step read it as EMPTY and titled the pull request
+          # "Predictable Code analysis ()" on a run that had analysed the project fine.
+          # The Control Center's own parser says it plainly: "the verdict is the single
+          # key of the envelope's `result`".
+          if [ "${PC_COMMAND}" != "sync" ]; then
+            # A FIX IS NOT JUDGED BY A VERDICT FIELD, and not by the exit code either.
+            # The product's rule is that a fix is `applied` only on POSITIVE EVIDENCE
+            # THAT SOURCE CHANGED — `fix-verdict.ts` is the one place that rule lives,
+            # and it exists because an exit code says a process finished, never that it
+            # did anything. On a runner that evidence is directly observable, so it is
+            # read from the tree in the next step rather than asserted here.
+            #
+            # `fix-issue` keeps its edit only if its own accept gates hold and restores
+            # the snapshot otherwise, so "changed nothing" is a real and ordinary
+            # outcome: the fix was tried and declined. That is reported, never failed.
+            echo "result=${PC_COMMAND}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RESULT=$(jq -r '.result | keys[0] // empty' "$RESULT_JSON" 2>/dev/null || true)
+          echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
+          echo "::notice::sync verdict: ${RESULT}"
+
+          # A DEGRADED VERDICT EXPLAINS ITSELF, WHATEVER DEGRADED IT.
+          #
+          # The block above lifts ONE cause — the tsc front end running out of memory —
+          # because its remedy is specific enough to be worth tailoring. Its own comment
+          # states the general rule it was only half applying: the reader's account of the
+          # run "says `degraded`, which is true and does not say WHY". Every OTHER way a
+          # run covers less than the project was still stated and not explained: a language
+          # whose toolchain would not install (`provisionLanguage` answers `unavailable`
+          # and that becomes the not-translated reason on THAT language's files alone), a
+          # front end that produced no IL for some files, files of no supported language,
+          # a Lean toolchain mismatch. The engine names each of them — `not translated
+          # (<reason>)` — and all of it goes to `$RUN_JSON`, where it is one progress line
+          # among hundreds inside a collapsed group on a run that ends GREEN.
+          #
+          # So `degraded` alone reads to a reader exactly as a clean bill with a word they
+          # skim past, which is the failure every honesty rule in this product exists to
+          # prevent — arriving through the reporting rather than through a verdict.
+          #
+          # IT LIFTS WHAT THE ENGINE SAID AND INVENTS NOTHING. Where the run left no
+          # readable reason the summary says so and points at this job's log, because
+          # "we could not tell you why" is an honest answer and a manufactured cause is
+          # not. Bounded to a handful of distinct lines: a summary that reprints a
+          # thousand per-file reasons is one nobody reads, and the count says how many
+          # were left for the log.
+          if [ "${RESULT}" = "degraded" ] && [ "${HEAP_EXPLAINED}" = "no" ]; then
+            REASONS=$(grep -o "not translated ([^)\\\"]*)" "$RUN_JSON" 2>/dev/null \
+              | sort | uniq -c | sort -rn | head -5 || true)
+            DISTINCT=$(grep -o "not translated ([^)\\\"]*)" "$RUN_JSON" 2>/dev/null \
+              | sort -u | wc -l | tr -d ' ' || true)
+            if [ -n "${REASONS}" ]; then
+              printf 'What the engine reported, most common first:\n\n```\n%s\n```\n' "${REASONS}" > "$WHY_FILE"
+            else
+              printf 'This run recorded no per-file reason that could be read back. The job log holds the full phase output, and `Code/.il/.report.json` names every file that did not translate.\n' > "$WHY_FILE"
+            fi
+            echo "::warning::this analysis covers less than the project (verdict: degraded) — see the job summary for what did not translate"
+            {
+              echo "### This analysis covers less than your project"
+              echo
+              echo "The run finished and its verdict is **degraded**, which means part of the project was not translated, so the analysis, the inferred requirements and the datasets this app reads all describe less than what is in the repository. **Nothing here says your code is wrong.**"
+              echo
+              if [ -n "${REASONS}" ]; then
+                echo "What the engine reported, most common first:"
+                echo
+                echo '```'
+                echo "${REASONS}"
+                echo '```'
+                if [ "${DISTINCT:-0}" -gt 5 ]; then
+                  echo
+                  echo "That is the 5 most common of **${DISTINCT}** distinct reasons; this job's log holds them all, and so does \`Code/.il/.report.json\` in the results."
+                fi
+              else
+                echo "This run recorded no per-file reason that could be read back here. The phase output in this job's log is the full account, and \`Code/.il/.report.json\` in the results names every file that did not translate."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # EMPTY IS UNREADABLE, and that is the whole point of this check. The previous
+          # version tested only for the literal `unknown`, so a missing, null or
+          # unparseable verdict — every realistic way this fails — walked straight past
+          # the guard that exists to catch it. Reading the exit code alone reports a
+          # partial analysis as a clean one, which is what the verdict is for.
+          if [ -z "$RESULT" ]; then
+            echo "::error::the sync produced no readable verdict"
+            exit 1
+          fi
+
+      - name: Propose the results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERDICT: ${{ steps.analyse.outputs.result }}
+          TAG: ${{ steps.toolchain.outputs.tag }}
+          PC_COMMAND: ${{ inputs.command }}
+          # Through the environment for the reason the run step says: this input
+          # arrives from an API call and must never be spliced into shell.
+          PC_TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          git config user.name "predictable-code[bot]"
+          git config user.email "predictable-code[bot]@users.noreply.github.com"
+
+          # THE REPOSITORY'S OWN GIT HOOKS DO NOT RUN FOR THIS PUSH, and that is a
+          # correctness requirement rather than a convenience.
+          #
+          # Measured on a real repository: a `husky` pre-push hook ran the project's
+          # frontend test suite, two tests were ALREADY failing for reasons that have
+          # nothing to do with us, and git refused the push — so a completed analysis
+          # was produced, committed, and then thrown away. Any repository with a red
+          # test could never receive results.
+          #
+          # The hooks exist to gate a HUMAN pushing CODE. This commit touches nothing
+          # but `.predictable-code/`, changes no source, and is offered as a pull
+          # request the repository reviews and runs its own CI against — so the gate
+          # those hooks provide is not being skipped, it is being applied where it
+          # belongs. Disabling by `core.hooksPath` rather than `--no-verify` per
+          # command, so a hook cannot reappear through a git call somebody adds later.
+          git config core.hooksPath /dev/null
+
+          # WHY A PUSH IS WRAPPED AT ALL. A run can do every piece of work correctly and
+          # then lose all of it at this line, and git's own message does not say why.
+          # MEASURED: an analysis of `defuncto-predictable` translated 31 of 31 files,
+          # analysed them, inferred requirements — and ended with
+          #
+          #   ! [remote rejected] predictable/analysis-35549208032
+          #     (refusing to allow a GitHub App to create or update workflow
+          #      `.github/workflows/predictable-sync.yml`)
+          #
+          # because the Predictable workflow update had been merged WHILE the run was in
+          # flight. The run had checked the older commit out, so its branch carries the
+          # older workflow file, and once the default branch moved GitHub reads the push
+          # as an App updating a workflow — which this token may not do.
+          #
+          # The remedy is the customer's and it is one sentence long, so it is said here
+          # rather than left as a git error in a log nobody reads. NOT auto-repaired:
+          # rebasing the results onto the moved tip would make the analysis describe a
+          # commit its branch is not based on, and that is a product decision rather
+          # than a repair.
+          push_or_explain() {
+            if git push origin "$BRANCH" 2> "${RUNNER_TEMP}/pc-push.err"; then
+              cat "${RUNNER_TEMP}/pc-push.err" >&2
+              return 0
+            fi
+            cat "${RUNNER_TEMP}/pc-push.err" >&2
+            if grep -q "create or update workflow" "${RUNNER_TEMP}/pc-push.err"; then
+              echo "::error::this run analysed an older commit, and the Predictable workflow was updated on ${GITHUB_REF_NAME} while it ran; nothing is wrong with the results, but they cannot be pushed from a branch carrying the older workflow file — re-run it and they will publish"
+              {
+                echo "### The results could not be published"
+                echo
+                echo "This run started before the Predictable workflow on \`${GITHUB_REF_NAME}\` was updated, so its branch carries the older copy of \`.github/workflows/predictable-sync.yml\`. GitHub refuses a push from an app that would change a workflow file, which is the right rule and is why this stopped here."
+                echo
+                echo '**Nothing is wrong with the analysis.** Run it again and the results will publish.'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            return 1
+          }
+
+          # ──────────────────────────────────────────────────────────────────────
+          # A FIX PROPOSES DIFFERENT BYTES FOR A DIFFERENT REASON, so it branches here.
+          #
+          # An analysis writes `.predictable-code/` and the specs directory and touches
+          # NO source. A fix does the opposite: it edits source, and the whole point of
+          # the pull request is that a person reads that edit before it lands. The
+          # branch name matches the desktop product's (`predictable/propose/<finding>`)
+          # so the same finding proposes to the same place wherever the compute ran.
+          # ──────────────────────────────────────────────────────────────────────
+          if [ "${PC_COMMAND}" != "sync" ]; then
+            # SLUGGED, because a finding id reaches us from an API call and a branch
+            # name is not a free-form string: git refuses spaces, `..`, `~`, `^`, `:`,
+            # and a leading `-` would be read as an option. Anything outside the safe
+            # set becomes `-`, which cannot change WHICH branch is written because the
+            # id is also recorded in the commit and the pull request body.
+            SLUG=$(printf '%s' "${PC_TARGET}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-80)
+            BRANCH="predictable/propose/${SLUG}"
+            git checkout -b "$BRANCH"
+
+            # THE CHANGE SET IS THE VERDICT. `fix-issue` keeps its edit only if its own
+            # accept gates hold and restores the snapshot otherwise, so no change means
+            # the fix was tried and DECLINED — an ordinary outcome, reported as itself.
+            # Saying "fixed" here on an unchanged tree is the exact false success
+            # `fix-verdict.ts` exists to prevent.
+            # SOURCE ONLY. `git add -A` swept in `.predictable-code/` — MEASURED: a
+            # hosted fix published a pull request whose entire diff was
+            # `.predictable-code/logs/2026-09-21/01.log`, 81 lines of our own logging,
+            # under the title "Predictable Code fix". The CLI writes its logs and its
+            # re-analysis into the state directory as it works, so an unscoped stage in
+            # THIS branch commits our machinery and calls it the customer's fix.
+            #
+            # The analysis branch force-ADDS that directory on purpose, because there it
+            # is the product. Here it is exhaust: a fix's product is the source edit, and
+            # the state is re-derived by the next sync.
+            #
+            # AND THE AGENT'S OWN SETTINGS FILE, which is the THIRD thing our machinery has
+            # put in a customer's fix. MEASURED on the first hosted run where the agent
+            # actually worked: the pull request carried a correct one-line source fix AND a
+            # new `.claude/settings.local.json` pointing at
+            # `/home/runner/work/_temp/predictable-plugin/scripts/statusline.sh` — a path
+            # that exists only on that runner, for a status line the customer never asked
+            # for, written by the agent because we launch it with our plugin attached.
+            #
+            # SCOPED TO THAT ONE FILE, not to `.claude/`. A repository may legitimately
+            # keep `.claude/commands` or a shared `settings.json` under version control, and
+            # excluding the directory would silently drop a real change. `settings.local.json`
+            # is by convention the PER-MACHINE file — that is what `.local.` means, and
+            # Claude Code's own scaffolding gitignores it — so it is never part of a fix.
+            # STAGED THEN UNSTAGED, NOT EXCLUDED BY PATHSPEC, and this is the whole
+            # reason the line is two commands instead of one.
+            #
+            # A NEGATIVE PATHSPEC FLIPS `git add` INTO EXPLICIT MODE. With a plain
+            # `git add -A -- .` git walks the tree and SILENTLY SKIPS ignored files;
+            # add any `:!` pathspec and it starts reporting the ignored files the walk
+            # met as if they had been named on the command line, and exits 1:
+            #
+            #   The following paths are ignored by one of your .gitignore files:
+            #   .claude/settings.local.json
+            #   hint: Use -f if you really want to add them.
+            #
+            # MEASURED end to end on sunner-predictable, run 35634785114: a `fix-agent`
+            # for FIN-0001 did its work, and this step then died on the line meant to
+            # stage it. The step runs under `bash -e`, so a non-zero `git add` ends the
+            # job — a complete fix thrown away at the last step, exactly the shape the
+            # `.predictable-code` ignore defect already had once, arriving through the
+            # exclusion written to prevent the OTHER half of it.
+            #
+            # The unstage keeps both exclusions honest where they actually matter: a
+            # repository that does NOT ignore these paths would otherwise have our state
+            # directory and the agent's per-machine settings file in its pull request,
+            # which is what the pathspecs were for. `git reset` on a path with nothing
+            # staged is a no-op and exits 0, so this is safe in both worlds.
+            git add -A -- .
+            git reset -q -- .predictable-code .claude/settings.local.json
+            if git diff --cached --quiet; then
+              echo "::notice::the fix did not change any source; nothing to propose"
+              echo "No change was kept. \`fix-issue\` restores its snapshot when its accept gates do not hold, so this finding needs a different remedy." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            # WHO WROTE THIS CHANGE IS THE FIRST THING A REVIEWER NEEDS, and the two
+            # verbs are not the same claim. Saying "this is not an agent's work" over
+            # an agent's diff would be false in the one sentence a reviewer most relies
+            # on, so the provenance is chosen here rather than written once for both.
+            if [ "${PC_COMMAND}" = "fix-agent" ]; then
+              MADE_BY="\`predictable claude\`, an agent working in a checkout of this repository"
+              HOW="**An agent wrote this.** It was given the finding and asked to fix the underlying defect, not to silence it — but nothing re-checked the result before it was proposed, so read it as you would any pull request from a colleague."
+            else
+              MADE_BY="\`predictable analyze fix-issue\`"
+              HOW="**This is not an agent's work.** \`predictable analyze fix-issue\` edits narrowly and keeps the edit only if its own accept gates hold, so what is here was re-checked before it was proposed. It is still a change to your source, and it is here to be reviewed."
+            fi
+            git commit -m "Predictable Code fix for ${PC_TARGET}" \
+              -m "Produced by ${TAG} on ${GITHUB_SHA} by ${MADE_BY}."
+            push_or_explain
+            {
+              echo "A fix for \`${PC_TARGET}\`, produced by \`${TAG}\` in this repository's own Actions with ${MADE_BY}."
+              echo
+              echo "${HOW}"
+              echo
+              echo "The finding still stands on \`${GITHUB_REF_NAME}\` until this merges."
+            } > /tmp/pc-fix-body.md
+            gh pr create \
+              --title "Predictable Code fix: ${PC_TARGET}" \
+              --body-file /tmp/pc-fix-body.md \
+              --head "$BRANCH"
+            exit 0
+          fi
+
+          BRANCH="predictable/analysis-${GITHUB_RUN_ID}"
+          git checkout -b "$BRANCH"
+          # THE SPECS DIRECTORY TOO, because the product writes specs THERE.
+          #
+          # Markillo specs are the customer's own documents and live in their tree, not
+          # in our state directory: `resolveNewSpecsDir` puts them at `<repo>/specs`
+          # unless `defaultSpecsDir` says otherwise. Staging only `.predictable-code`
+          # therefore threw every inferred spec away — measured on a real run, which
+          # committed `.predictable-code/specs/locations/SPEC-001…004/` (evidence the
+          # specs existed) while the specs themselves were never added, so the pull
+          # request carried witness locations pointing at documents that were not in it.
+          #
+          # Read from the project's OWN config rather than assumed, because it is
+          # configurable and a hard-coded `specs` would be wrong for any project that
+          # set it. Added only if it exists: `git add` on a missing path is an error,
+          # and a project with no specs yet is an ordinary state, not a failure.
+          SPECS_DIR=$(jq -r '.defaultSpecsDir // "specs"' .predictable-code/project.json 2>/dev/null || echo specs)
+          # `-f`, AND THAT IS THE WHOLE FIX FOR A COMMON REPOSITORY.
+          #
+          # A project that has ever run Predictable locally has `.predictable-code/`
+          # in its own `.gitignore` — that is what `init` puts there, because locally
+          # the state directory is build output nobody commits. On this branch it is
+          # the PRODUCT, and `git add` refuses an ignored path:
+          #
+          #   The following paths are ignored by one of your .gitignore files:
+          #   .predictable-code
+          #   hint: Use -f if you really want to add them.
+          #
+          # Measured on predictable-code-open-java-tests: translation 5/5, analysis 10
+          # findings, verdict `mechanical` — a complete, correct run whose results were
+          # then thrown away at the last step, exit 1, nothing published. It went
+          # unnoticed because the first repository tested does NOT ignore the
+          # directory, so the one corpus that proved the path was the one that could
+          # not show this.
+          #
+          # Forcing is right rather than a workaround: this branch exists to carry
+          # these files, the ignore rule is about the user's own working tree, and
+          # nothing else is added — `-A` is scoped to these two paths.
+          git add -Af .predictable-code
+          # LAKE'S BUILD DIRECTORY IS NOT THE PRODUCT, and force-adding the state
+          # directory swept it in wholesale.
+          #
+          # MEASURED on sunner-predictable: the customer's repository carries
+          # `.predictable-code/verification/.lake/build/ir/Code/IlPrelude.c` — generated
+          # C, its `.hash` and its `setup.json` — 1094 files of Lake's intermediate
+          # output in a pull request titled "Predictable Code analysis". The `.il/`
+          # documents, the findings, the SARIF and `viewer-data.json` beside them ARE
+          # the product and stay; this directory is how the product was built, which is
+          # nobody's business but the runner's, and it is gone when the runner is.
+          #
+          # This is the fourth instance of the class the comments above already record
+          # twice — our machinery reaching a surface that is supposed to be theirs —
+          # and, like the fix branch's, it is taken back out rather than excluded by a
+          # pathspec, because a negative pathspec makes `git add` exit 1 on an ignored
+          # path and end the step.
+          git reset -q -- .predictable-code/verification/.lake
+          if [ -d "$SPECS_DIR" ]; then
+            echo "::notice::staging inferred specs from ${SPECS_DIR}/"
+            # Same reason: a project may ignore its specs directory locally, and the
+            # pull request is worthless without the documents its findings cite.
+            git add -Af "$SPECS_DIR"
+          fi
+
+          # WHAT WE WROTE IS MARKED AS GENERATED, or the repository's OWN formatter
+          # fails on it and nothing this product proposes can ever be merged.
+          #
+          # MEASURED on sunner-predictable. Once an analysis pull request landed our
+          # state directory, its `prettier --check .` reported "Code style issues found
+          # in 4993 files" — and 4993 of the 4994 it listed were OURS: 2687
+          # `.analysis-findings/`, 1094 `.lake/` (excluded above), 607 `specs/`, 383
+          # other state, 222 `Code/.il/`. Exactly ONE entry was theirs. Its CI has
+          # failed on every pull request since, the workflow updates this product opens
+          # included, so the fix for any of this could not reach it.
+          #
+          # `.prettierignore` IS THE MECHANISM FOR EXACTLY THIS, and this is the
+          # narrowest use of it: their own files go on being checked precisely as
+          # before, and only what we wrote is exempt.
+          #
+          # ONLY WHERE PRETTIER IS ACTUALLY USED — a project that does not use it gets
+          # no new file at all. ONLY THE MISSING LINES — a project that already excludes
+          # these paths is not edited, so this is a no-op on every run after the first.
+          # A TRAILING NEWLINE IS ENSURED FIRST: appending to a file whose last byte is
+          # not a newline would join our entry onto theirs and produce one line that
+          # matches neither. Measured on this repository's own shape, whose
+          # `.prettierignore` is the single line `**/public` with no closing newline.
+          # NOT FORCED, and that is the point. `-f` overrides the customer's own ignore
+          # rules and is deliberately scoped to the two paths this branch exists to
+          # carry — a rule the template's own gate pins, and which caught a `git add -f`
+          # here as a third forced path. A repository that ignores its own
+          # `.prettierignore` is telling us not to commit one, and a plain `git add` on
+          # an ignored path exits 1 and would end the step, which is the defect this file
+          # already carries a fix for. So the case is CHECKED rather than forced past or
+          # swallowed with `|| true`.
+          if git check-ignore -q .prettierignore 2>/dev/null; then
+            echo "::notice::this repository ignores its own .prettierignore; leaving it alone"
+          elif [ -f .prettierignore ] \
+            || ls .prettierrc* prettier.config.* >/dev/null 2>&1 \
+            || jq -e 'has("prettier")' package.json >/dev/null 2>&1; then
+            for GENERATED in ".predictable-code/" "${SPECS_DIR}/"; do
+              if ! grep -qxF "$GENERATED" .prettierignore 2>/dev/null; then
+                if [ -s .prettierignore ] && [ -n "$(tail -c1 .prettierignore)" ]; then
+                  printf '\n' >> .prettierignore
+                fi
+                printf '%s\n' "$GENERATED" >> .prettierignore
+                echo "::notice::marked ${GENERATED} as generated in .prettierignore"
+              fi
+            done
+            git add .prettierignore
+          fi
+
+          if git diff --cached --quiet; then
+            echo "::notice::the analysis changed nothing; no pull request opened"
+            exit 0
+          fi
+
+          git commit -m "Predictable Code analysis (${VERDICT})" \
+            -m "Produced by ${TAG} on ${GITHUB_SHA}. Verdict: ${VERDICT}."
+          push_or_explain
+
+          # The verdict is in the title because it is the first thing a reader needs:
+          # a `degraded` run analysed part of the project, and a PR that did not say so
+          # would read as a full one.
+          # Written to a file, not passed inline: a quoted multi-line argument inside an
+          # indented YAML block carries that indentation into the rendered markdown.
+          {
+            echo "Analysis of \`${GITHUB_SHA}\`, produced by \`${TAG}\` in this repository's own Actions."
+            echo
+            echo "**Verdict: \`${VERDICT}\`** — \`degraded\` means only part of the project translated, and \`mechanical\` means the run stopped before the proving tail. Neither is a failure, and neither is a clean bill."
+            echo
+            # AND WHY, WHEN IT COVERED LESS. The verdict alone sends a reviewer to the run log to
+            # find out what was missed — and the run log expires, while the pull request does not.
+            # The reasons were extracted once, by the analyse step, beside the data they come from.
+            WHY_FILE="${RUNNER_TEMP}/pc-degraded-why.txt"
+            if [ -s "$WHY_FILE" ]; then
+              echo "### Why this run covered less than the project"
+              echo
+              cat "$WHY_FILE"
+              echo
+              echo "**Nothing here says your code is wrong.**"
+              echo
+            fi
+            echo "Only \`.predictable-code/\` and your specs directory are written — no source file is changed."
+          } > /tmp/pc-body.md
+
+          gh pr create \
+            --title "Predictable Code analysis (${VERDICT})" \
+            --body-file /tmp/pc-body.md \
+            --head "$BRANCH"
