@@ -133,12 +133,14 @@ the database, refused with one line naming `predictable migrate`:
   turn end tells the **user** once per session, and every prompt tells the
   **agent**, with what to do about it, until a sync runs.
 
-The `PreToolUse` hook also **auto-approves the plugin's own commands** — running
-`predictable sync`, linking the Control Center (`scripts/control-center-url.sh`), and
-recording an agent-reviewed fix (`predictable specs requirements agent-verify`) —
-so the agent runs them without a permission prompt (`git push`/`git commit` still
-go through the gate, and every other command falls through to the host's normal
-permission flow).
+The `PreToolUse` hook also **auto-approves every `predictable` command** —
+`predictable sync`, `autofix`, `fix-check`, `specs …` and the rest — and linking the
+Control Center (`scripts/control-center-url.sh`), so the agent runs them without a
+permission prompt. It goes by the program a command RUNS, not a word it contains
+(`echo predictable` is not approved), and every part of a chained command must be
+one (`git push && predictable sync` is not); `git push`/`git commit` still go
+through the gate, and every other command falls through to the host's normal
+permission flow.
 
 ## Worktrees & surfaces
 

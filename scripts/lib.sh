@@ -68,13 +68,30 @@ pc_askquestion_rule() {
 # walk (`$(`, backticks, parens) all become boundaries, so `$(git push)` reads as
 # its own segment rather than as an opaque argument to `echo`.
 pc_segments() { # command
-  # shellcheck disable=SC2016  # `$(` here is literal text being replaced, not an expansion.
   # The trailing newline matters: `read` returns false at EOF, so a line without
   # one is never seen by a `while read` loop — a single-segment `git commit`
   # silently produced no segments at all.
+  #
+  # QUOTE-AWARE (#2585): a `|` or `;` inside quotes is text, not a separator, so
+  # `predictable fix-check --key 'Code.a.B.f|vc1' --json` is ONE segment. Splitting
+  # it at the quoted `|` left a segment (`vc1' --json`) that runs no Predictable, and
+  # the agent's own check asked for permission. Inside double quotes `$(…)` and
+  # backticks still RUN a command, so they still split there.
   printf '%s\n' "$1" |
-    sed -e 's/\$(/;/g' -e 's/[()`]/;/g' -e 's/&&/;/g' -e 's/||/;/g' -e 's/[|&]/;/g' |
-    tr ';' '\n'
+    awk '{
+      s = $0; out = ""; q = ""; n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (q == "\047") { out = out c; if (c == "\047") q = ""; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "(") { out = out "\n"; i++; continue }
+        if (c == "`") { out = out "\n"; continue }
+        if (q == "\"") { out = out c; if (c == "\"") q = ""; continue }
+        if (c == "\047" || c == "\"") { q = c; out = out c; continue }
+        if (index("();|&", c) > 0) { out = out "\n"; continue }
+        out = out c
+      }
+      print out
+    }'
 }
 
 # The git subcommand one segment runs, or empty when it does not run git.
@@ -165,8 +182,11 @@ pc_gated_verbs() { # command
   fi
 }
 
-# True when EVERY segment runs one of Predictable's own verbs. Every, not any:
-# `git push && predictable sync` must not be approved on its second half.
+# True when EVERY segment runs Predictable: the plugin gives the agent every `predictable`
+# command (#2585), so `sync`, `fix-check`, `autofix`, `specs …` and the rest run without a
+# permission prompt. Every segment, not any: `git push && predictable sync` must not be
+# approved on its second half. And by the COMMAND a segment runs, never a word it contains:
+# `echo predictable sync` or `rm -rf predictable` runs no Predictable at all.
 pc_is_own_command() { # command
   _pc_any=0
   _pc_all=1
@@ -185,12 +205,12 @@ pc_is_own_command() { # command
         "\"${CLAUDE_PLUGIN_ROOT:-/nonexistent}/scripts/control-center-url.sh\"" | \
         "${CLAUDE_PLUGIN_ROOT:-/nonexistent}/scripts/control-center-url.sh") continue ;;
     esac
-    case "$_pc_seg" in
-      *predictable*) ;;
-      *) _pc_all=0; continue ;;
-    esac
-    case "$_pc_seg" in
-      *" sync"* | *" init"* | *agent-verify* | *" settings"* | *" project"* | *" open"*) ;;
+    # The program the segment runs: its first word once leading `NAME=value` assignments are
+    # dropped, unquoted. `predictable`, a path to it, or the plugin's own `bin/predictable`.
+    _pc_prog=$(printf '%s' "$_pc_trim" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//' |
+      awk '{print $1}' | tr -d "\"'")
+    case "${_pc_prog##*/}" in
+      predictable) ;;
       *) _pc_all=0 ;;
     esac
   done <<EOF
