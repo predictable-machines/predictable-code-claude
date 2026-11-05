@@ -1,0 +1,11 @@
+{
+  "codePaths": [
+    ".claude-plugin",
+    "commands",
+    "fixtures",
+    "hooks",
+    "scripts",
+    "skills",
+    "tests"
+  ]
+}
