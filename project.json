@@ -10,7 +10,14 @@
  "docPaths": ["."],
  "docExtensions": ["md"],
  "defaultSpecsDir": null,
- "codePaths": [],
+ "codePaths":
+ [".claude-plugin",
+  "commands",
+  "fixtures",
+  "hooks",
+  "scripts",
+  "skills",
+  "tests"],
  "aiProvider":
  {"model": "claude-sonnet-5",
   "fastModel": "claude-haiku-4-5",
