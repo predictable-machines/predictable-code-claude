@@ -242,12 +242,22 @@ rc=1
 [ "$CODE" -eq 0 ] && ! contains "$OUT" '"permissionDecision": "allow"' && rc=0
 check "a command merely naming the link script -> NOT auto-allowed" "$rc" "exit $CODE out=$OUT"
 
-# `predictable serve` is a deleted verb: nothing auto-approves it any more.
+# EVERY `predictable` command is the plugin's to run (#2585): the agent fixes with `autofix`
+# and checks with `fix-check` without a prompt, as it syncs.
+for fx in pre-tool-use-predictable-autofix.json pre-tool-use-predictable-fix-check.json pre-tool-use-serve.json; do
+  fresh_data
+  run_hook sync-gate.sh "$fx"
+  rc=1
+  contains "$OUT" '"permissionDecision": "allow"' && [ "$CODE" -eq 0 ] && rc=0
+  check "$fx -> auto-allow (a predictable command)" "$rc" "exit $CODE out=$OUT"
+done
+
+# By the program a segment RUNS, never a word it contains.
 fresh_data
-run_hook sync-gate.sh pre-tool-use-serve.json
+run_hook sync-gate.sh pre-tool-use-predictable-mentioned.json
 rc=1
 [ "$CODE" -eq 0 ] && ! contains "$OUT" '"permissionDecision": "allow"' && rc=0
-check "predictable serve (deleted) -> NOT auto-allowed" "$rc" "exit $CODE out=$OUT"
+check "a command merely naming predictable -> NOT auto-allowed" "$rc" "exit $CODE out=$OUT"
 
 fresh_data
 run_hook sync-gate.sh pre-tool-use-agent-verify.json

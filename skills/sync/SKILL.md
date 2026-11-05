@@ -5,9 +5,12 @@ description: Check / verify a project with Predictable Code by running `predicta
 
 # Predictable Code — sync
 
-This plugin exposes exactly one Predictable command: **`predictable sync`**. It runs
-the whole verification pipeline internally (translate → analyze → infer →
-prove/verify → diagnose) and returns a single verdict. There are no other verbs.
+The command that checks a project is **`predictable sync`**. It runs the whole
+verification pipeline internally (translate → analyze → infer → prove/verify →
+diagnose) and returns a single verdict. Every other `predictable` command is yours
+to run too, without a permission prompt (`predictable --help` lists them); the ones
+a fix needs are in **Applying fixes** below: `autofix`, which fixes a defect with no
+model, and `fix-check`, which says whether a defect is gone.
 
 > **Predictable is the source of truth — RUN it, never investigate by hand.** The
 > ONLY way to check a project is to run `predictable sync --json --claude` and report
@@ -368,6 +371,24 @@ Before editing code to fix findings — **especially a bulk/batch fix** — conf
 plan with the user via `AskUserQuestion` (the batch/strategy, per the funnel — not
 one prompt per finding). After applying, re-run the check to confirm the batch
 cleared (that is the **Re-check** step above). Never bulk-rewrite without an OK.
+
+**Let a program fix what a program can, FIRST.** Many defects have a fix Predictable
+already worked out — it applies it, re-analyses and builds the project, and keeps the
+edit only when all three agree, with no model. So once the user has OK'd fixing:
+
+1. List them (it reads the last check and runs nothing):
+   `predictable autofix --list` — its `predictable_autofix_list` line names each
+   fixable defect's `key`, `file` and `line`.
+2. Fix each of them with `predictable autofix --key '<key>'` (several at once:
+   write their keys as a JSON array to a file and run
+   `predictable autofix --keys-file <file>`). The last line ends `RESULT: fixed`
+   when it worked; otherwise it put every file back as it was.
+3. Fix the rest yourself, and after each one ask
+   `predictable fix-check --key '<key>' --json` — `gone` means it is fixed.
+
+Inside a fix session Predictable started (its prompt says so), use the exact
+`predictable autofix … --keep-baseline` line that prompt gives instead: the session
+recorded where the fix starts, and that is what it judges the fix against.
 
 ## Agent-verified: you finish what Predictable can't
 
