@@ -29,7 +29,7 @@
 # The stamp below is how the Control Center knows whether this repository is running a
 # current copy. It is compared as a NUMBER, never as a diff, so your own edits to this
 # file — a bigger `runner:`, a different `heap_mb` — are yours and are left alone.
-# predictable-workflow-version: 72
+# predictable-workflow-version: 74
 name: Predictable Code
 
 on:
@@ -75,7 +75,8 @@ on:
         #
         # `spec-fill-descriptions` (#2103) asks a model for the descriptions the specs lack —
         # every one, or the spec files `text` names — and proposes exactly the files it wrote on
-        # `predictable/specs/documentation`. It needs the key like a fix.
+        # `predictable/specs/documentation`. It needs the key like a fix. Its `prompt` is the
+        # areas mode the repository agent's duties ask for (#2629): `with`, `without` or `only`.
         #
         # `spec-implement` (#2339) IMPLEMENTS a spec: an agent changes the code until this run's own
         # analysis verifies every requirement of the spec and reports no finding the project did not
@@ -131,7 +132,7 @@ on:
         # come to be told something a local one is not.
         # For `spec-generate` it is the person's short description of the feature, which the
         # model expands: also what a model is asked, and also supplied verbatim.
-        description: "For command=fix-agent, what the agent is asked to do. For spec-generate, the person's short description of the feature."
+        description: "For command=fix-agent, what the agent is asked to do. For spec-generate, the person's short description of the feature. For spec-fill-descriptions, the areas mode: with (descriptions and areas, the default when empty), without (descriptions only) or only (areas of specs already described)."
         required: false
         default: ""
         type: string
@@ -1718,6 +1719,11 @@ jobs:
                   case "$_line" in -*|*[[:cntrl:]]*) echo "::error::invalid spec file in the selection"; exit 1 ;; esac
                 done < "${RUNNER_TEMP}/pc-selection.txt"
               fi
+              # THE AREAS MODE (#2629) is a flag value, so only its three spellings pass.
+              case "${PC_PROMPT:-}" in
+                ""|with|without|only) ;;
+                *) echo "::error::spec-fill-descriptions takes the areas mode with, without or only"; exit 1 ;;
+              esac
             elif [ "${PC_COMMAND}" = "spec-implement" ]; then
               [ -n "${PC_TARGET}" ] || {
                 echo "::error::spec-implement needs a target spec"
@@ -1856,6 +1862,10 @@ jobs:
             PC_STARTED="${PC_JOB_STARTED:-$PC_NOW}"
             FIX_DEADLINE=$(( PC_STARTED + PC_JOB_SECONDS - 900 - PC_NOW ))
             [ "$FIX_DEADLINE" -gt 300 ] || FIX_DEADLINE=300
+            # THE SECOND LINE, as for an implementation: the driver stops its own agent mid-turn at
+            # its deadline; if it is still running eight minutes before the timeout (a check that
+            # will not end), it is stopped here and the run continues in a new one.
+            PC_HARD_STOP=$(( PC_STARTED + PC_JOB_SECONDS - 480 ))
             # shellcheck disable=SC2086
             predictable fix \
               --key "${PC_FINDING}" \
@@ -1903,12 +1913,15 @@ jobs:
                 -m "Predictable-Fix-Base: ${GITHUB_SHA}"
             fi
             echo "PC_FIX_BASE=${FIX_BASE}" >> "$GITHUB_ENV"
-            # THE BUDGET, read after the continuation's starting checks, as for a single fix.
+            # THE BUDGET, read after the continuation's starting checks, as for a single fix — and the
+            # same second line. MEASURED on a hosted Fix All: one turn of 95 steps outlasted the
+            # hour, GitHub cancelled the job, and nothing the agent verified was committed.
             PC_JOB_SECONDS=3600
             PC_NOW=$(date +%s)
             PC_STARTED="${PC_JOB_STARTED:-$PC_NOW}"
             FIX_DEADLINE=$(( PC_STARTED + PC_JOB_SECONDS - 900 - PC_NOW ))
             [ "$FIX_DEADLINE" -gt 300 ] || FIX_DEADLINE=300
+            PC_HARD_STOP=$(( PC_STARTED + PC_JOB_SECONDS - 480 ))
             # shellcheck disable=SC2086
             predictable fix \
               --together \
@@ -2071,12 +2084,14 @@ jobs:
             [ "$DESCRIBE_LIMIT" -gt 60 ] || DESCRIBE_LIMIT=60
             PC_HARD_STOP=$(( PC_STARTED + PC_JOB_SECONDS - 480 ))
             DESCRIBE_CHECKPOINT="${RUNNER_TEMP}/pc-describe-checkpoint.ndjson"
+            # Which half the repository agent's duties ask for (#2629); checked above.
+            DESCRIBE_AREAS="${PC_PROMPT:-with}"
             if [ "${PC_TEXT}" = "all" ]; then
-              predictable specs fill-descriptions --all \
+              predictable specs fill-descriptions --all --areas "$DESCRIBE_AREAS" \
                 --time-limit "$DESCRIBE_LIMIT" --checkpoint "$DESCRIBE_CHECKPOINT" \
                 --path "$PWD/.predictable-code" --json > "$RESULT_JSON" 2> "$RUN_JSON" &
             else
-              predictable specs fill-descriptions --specs "${PC_TEXT}" \
+              predictable specs fill-descriptions --specs "${PC_TEXT}" --areas "$DESCRIBE_AREAS" \
                 --time-limit "$DESCRIBE_LIMIT" --checkpoint "$DESCRIBE_CHECKPOINT" \
                 --path "$PWD/.predictable-code" --json > "$RESULT_JSON" 2> "$RUN_JSON" &
             fi
@@ -2194,7 +2209,7 @@ jobs:
                 predictable/*)
                   printf 'none\na pull request of ours is not given a second fix\n' > "$REVIEW_FIX"
                   return "$REVIEW_STATUS"
-                  ;;
+                ;;
               esac
               if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
                 printf 'not-attempted\nthis repository has no model key (ANTHROPIC_API_KEY), so no fix was attempted\n' > "$REVIEW_FIX"
@@ -2366,13 +2381,37 @@ jobs:
             # tells this stop from every other failure without reading a log.
             echo "stopped=true" >> "$GITHUB_OUTPUT"
           elif [ "${PC_HARD_STOPPED:-no}" = "yes" ] && [ "$RUN_STATUS" -gt 128 ]; then
-            if [ "${PC_COMMAND}" = "spec-implement" ]; then
-              echo "::warning::${PC_COMMAND} was stopped at its time bound; what the agent wrote is proposed as a draft, unchecked"
-              echo "The implementation was stopped at its time bound; what the agent wrote is proposed as a draft, unchecked." >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::warning::${PC_COMMAND} was stopped at its time bound; the descriptions it wrote are proposed from its checkpoint, and the rest are left for another run"
-              echo "The run was stopped at its time bound; what it wrote is proposed, and the rest are left for another run." >> "$GITHUB_STEP_SUMMARY"
-            fi
+            case "${PC_COMMAND}" in
+              fix-agent|fix-all-agent)
+                # A STOPPED DRIVER WROTE NO RESULT, so this step writes the one it would have: `continue`.
+                # The Control Center continues a fix only on that outcome, read from the stream, and
+                # the Propose step reads it too — pushing a single fix's work in progress, or a batch's
+                # verified commits (what no round verified is never committed). Without it the plane
+                # would read a stopped run as one that ended with no answer.
+                # A stop that landed inside the driver's own `git commit` leaves its lock, and every
+                # git command of the Propose step would then refuse. Nothing of ours is running now.
+                rm -f .git/index.lock
+                # ONE result per run: a driver that wrote its own before it was stopped has answered.
+                PC_HAS_RESULT=$(jq -cR 'fromjson? | objects | select(.type == "result" and .predictable_fix != null)' "$AGENT_JSON" 2>/dev/null | wc -l | tr -d ' ')
+                if [ "${PC_HAS_RESULT:-0}" = 0 ]; then
+                  PC_STOP_ROUNDS=$(jq -cR 'fromjson? | objects | select(.subtype == "predictable_fix_round")' "$AGENT_JSON" 2>/dev/null | wc -l | tr -d ' ')
+                  jq -cn --argjson rounds "${PC_STOP_ROUNDS:-0}" '{type: "result", subtype: "fix_continue", is_error: true,
+                    result: "RESULT: not fixed — stopped at the time bound of this job; the work continues in a new run",
+                    predictable_fix: {outcome: "continue", rounds: $rounds, last: null,
+                      reason: "stopped at the time bound of this job; the work continues in a new run"}}' >> "$AGENT_JSON"
+                fi
+                echo "::warning::${PC_COMMAND} was stopped at its time bound; what it verified is kept and the fix continues in a new run"
+                echo "The fix was stopped at its time bound; what it verified is kept, and it continues in a new run." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              spec-implement)
+                echo "::warning::${PC_COMMAND} was stopped at its time bound; what the agent wrote is proposed as a draft, unchecked"
+                echo "The implementation was stopped at its time bound; what the agent wrote is proposed as a draft, unchecked." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              *)
+                echo "::warning::${PC_COMMAND} was stopped at its time bound; the descriptions it wrote are proposed from its checkpoint, and the rest are left for another run"
+                echo "The run was stopped at its time bound; what it wrote is proposed, and the rest are left for another run." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+            esac
           fi
           if [ "${PC_HARD_STOPPED:-no}" = "yes" ] && [ "$RUN_STATUS" -gt 128 ]; then RUN_STATUS=0; fi
           # The tail: phases written between the last poll and the process exiting are
@@ -3293,7 +3332,7 @@ jobs:
                 *)
                   echo "the proposal ${BRANCH} is not under predictable/agent/${PC_TARGET}/" >> "${RUNNER_TEMP}/pc-agent-notes.txt"
                   continue
-                  ;;
+                ;;
               esac
               if ! git rev-parse --verify --quiet "refs/heads/${BRANCH}" >/dev/null; then
                 echo "the proposal ${BRANCH} was named but never committed" >> "${RUNNER_TEMP}/pc-agent-notes.txt"
