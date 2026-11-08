@@ -1,0 +1,17 @@
+{"sourceExtensions": [],
+ "sandbox": null,
+ "runtime": null,
+ "name": "predictable-code-claude",
+ "mode": "yolo",
+ "maxRegenerateIterations": null,
+ "maxReconcileIterations": 3,
+ "guidelines": [],
+ "excludePaths": null,
+ "docPaths": ["."],
+ "docExtensions": ["md"],
+ "defaultSpecsDir": null,
+ "codePaths": [],
+ "aiProvider":
+ {"model": "claude-sonnet-5",
+  "fastModel": "claude-haiku-4-5",
+  "engine": "claudeCode"}}
