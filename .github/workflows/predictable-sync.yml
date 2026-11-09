@@ -29,7 +29,7 @@
 # The stamp below is how the Control Center knows whether this repository is running a
 # current copy. It is compared as a NUMBER, never as a diff, so your own edits to this
 # file — a bigger `runner:`, a different `heap_mb` — are yours and are left alone.
-# predictable-workflow-version: 74
+# predictable-workflow-version: 75
 name: Predictable Code
 
 on:
@@ -116,7 +116,7 @@ on:
         # publishes the result as the analysis of the commit it checked out. Keyless, and started by
         # the Control Center alone; over an analysis another build wrote it analyses instead, since
         # that analysis is not this build's to rebuild.
-        description: "What to run: sync (analyse), fix (one deterministic fix), fix-agent (one agent fix), fix-all-agent (every defect in one agent session, into a live draft pull request), spec-new / spec-describe / requirement-add / requirement-update / requirement-remove (author a spec), spec-generate (a new spec whose requirements a model writes), spec-fill-descriptions (a model writes the specs' missing descriptions), spec-implement (an agent implements a spec until the analysis verifies it), plugins-discover (an agent writes checks for defects the analysis misses, then the run syncs with them), review (review a pull request, on its head branch), agent (the repository agent reacts to one GitHub event), or republish (rebuild the datasets over the last analysis when only module summaries changed)."
+        description: "What to run: sync (analyse), fix (one deterministic fix), fix-agent (one agent fix), fix-all-agent (every defect in one agent session, into a live draft pull request), autofix (apply, with no model, the fixes the analysis already decided for the batch of defects the Control Center wrote, and propose the verified ones as one pull request), spec-new / spec-describe / requirement-add / requirement-update / requirement-remove (author a spec), spec-generate (a new spec whose requirements a model writes), spec-fill-descriptions (a model writes the specs' missing descriptions), spec-implement (an agent implements a spec until the analysis verifies it), plugins-discover (an agent writes checks for defects the analysis misses, then the run syncs with them), review (review a pull request, on its head branch), agent (the repository agent reacts to one GitHub event), or republish (rebuild the datasets over the last analysis when only module summaries changed)."
         required: false
         default: sync
         type: string
@@ -761,7 +761,7 @@ jobs:
       # its install fetches from the registry instead.
       - name: Restore the dependency stores
         id: depcache
-        if: contains(fromJSON('["sync","fix","fix-agent","fix-all-agent","spec-implement","plugins-discover","review","agent"]'), inputs.command)
+        if: contains(fromJSON('["sync","fix","fix-agent","fix-all-agent","autofix","spec-implement","plugins-discover","review","agent"]'), inputs.command)
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -1019,7 +1019,7 @@ jobs:
         # token the agent can print. This step launches no agent — it runs `specs details` and
         # `gh pr list` — so the job's own token is safe here.
         id: spec
-        if: inputs.command == 'spec-new' || inputs.command == 'spec-describe' || inputs.command == 'requirement-add' || inputs.command == 'requirement-update' || inputs.command == 'requirement-remove' || inputs.command == 'spec-generate' || inputs.command == 'spec-fill-descriptions' || inputs.command == 'spec-implement' || inputs.command == 'fix' || inputs.command == 'fix-agent' || inputs.command == 'fix-all-agent'
+        if: inputs.command == 'spec-new' || inputs.command == 'spec-describe' || inputs.command == 'requirement-add' || inputs.command == 'requirement-update' || inputs.command == 'requirement-remove' || inputs.command == 'spec-generate' || inputs.command == 'spec-fill-descriptions' || inputs.command == 'spec-implement' || inputs.command == 'fix' || inputs.command == 'fix-agent' || inputs.command == 'fix-all-agent' || inputs.command == 'autofix'
         env:
           PC_HOME: ${{ steps.toolchain.outputs.predictable_home }}
           PC_COMMAND: ${{ inputs.command }}
@@ -1217,6 +1217,15 @@ jobs:
               esac
               [ "${#PC_TARGET}" -le 12 ] || { echo "::error::'${PC_TARGET}' is not a batch id"; exit 1; }
               FIX_BRANCH="predictable/fix-all/${PC_TARGET}"
+              ;;
+            # AUTOFIX (#2585): the batch the Control Center wrote (`.autofix/<id>.json`), held to the
+            # same id rule as a Fix All batch, on its own branch.
+            autofix)
+              case "${PC_TARGET}" in
+                ''|-*|*[!A-Za-z0-9-]*) echo "::error::'${PC_TARGET}' is not a batch id"; exit 1 ;;
+              esac
+              [ "${#PC_TARGET}" -le 12 ] || { echo "::error::'${PC_TARGET}' is not a batch id"; exit 1; }
+              FIX_BRANCH="predictable/autofix/${PC_TARGET}"
               ;;
           esac
           # A BATCH CONTINUES ITS OWN BRANCH: the commits on it are the ones its gate verified, and
@@ -2024,6 +2033,20 @@ jobs:
           elif [ "${PC_COMMAND}" = "fix" ]; then
             predictable analyze fix-issue "${PC_TARGET}" \
               --path "$PWD/.predictable-code" --json > "$RESULT_JSON" 2> "$RUN_JSON" &
+          # AUTOFIX (#2585): the edits the analysis already decided, each kept only when its own
+          # re-analysis says the defect is gone and the build has no new error — no model, no key.
+          # The keys travel as a FILE on the data branch, as a Fix All batch's do. Its stream goes to
+          # stdout (`$AGENT_JSON`, pushed), where the Control Center reads which were kept, and
+          # `PREDICTABLE_REPORTED_RUN=1` keeps each re-analysis from publishing the base as fixed.
+          elif [ "${PC_COMMAND}" = "autofix" ]; then
+            export PREDICTABLE_REPORTED_RUN=1
+            AUTOFIX_FILE=".predictable-code/.autofix/${PC_TARGET}.json"
+            [ -f "$AUTOFIX_FILE" ] || {
+              echo "::error::no autofix batch ${PC_TARGET} on predictable-code-database (.autofix/${PC_TARGET}.json)"
+              exit 1
+            }
+            predictable autofix --keys-file "$AUTOFIX_FILE" \
+              --path "$PWD/.predictable-code" > "$AGENT_JSON" 2> "$RUN_JSON" &
           # AUTHORING (#2019): the same three verbs the desktop product runs, with `--json` so
           # the one file each wrote comes back as `filePath` — the ONLY path the propose step
           # stages. `--blank` because a hosted spec is authored by a person, never generated.
@@ -2673,7 +2696,7 @@ jobs:
           # and opens what it names and reports it. A run that printed none still reports — `failed`,
           # with why — so the Control Center never reads silence as a run that did nothing.
           if [ "${PC_COMMAND}" = "agent" ]; then
-            jq -c 'select(.type == "result") | .predictable_agent // empty' "$AGENT_JSON" 2>/dev/null \
+            jq -cR 'fromjson? | objects | select(.type == "result") | .predictable_agent // empty' "$AGENT_JSON" 2>/dev/null \
               | tail -n 1 > "${RUNNER_TEMP}/pc-agent.json" || true
             if [ ! -s "${RUNNER_TEMP}/pc-agent.json" ]; then
               jq -n --arg status "$RUN_STATUS" \
@@ -3733,7 +3756,7 @@ jobs:
                 exit 1
               }
               AGENT_OUT="${RUNNER_TEMP}/predictable-agent.ndjson"
-              IMPL=$(jq -c 'select(.type == "result") | .predictable_implement // empty' "$AGENT_OUT" 2>/dev/null | tail -n 1 || true)
+              IMPL=$(jq -cR 'fromjson? | objects | select(.type == "result") | .predictable_implement // empty' "$AGENT_OUT" 2>/dev/null | tail -n 1 || true)
               [ -n "$IMPL" ] || IMPL='{}'
               OUTCOME=$(printf '%s' "$IMPL" | jq -r '.outcome // empty' 2>/dev/null || true)
               case "$OUTCOME" in
@@ -3942,11 +3965,16 @@ jobs:
             # own stream; THIS step marks it ready when the batch ends, so its end state never
             # depends on the Control Center surviving a multi-hour batch.
             if [ "${PC_COMMAND}" = "fix-all-agent" ]; then
-              FIX_OUTCOME=$(jq -r 'select(.type == "result") | .predictable_fix.outcome // empty' \
+              FIX_OUTCOME=$(jq -rR 'fromjson? | objects | select(.type == "result") | .predictable_fix.outcome // empty' \
                 "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null | tail -n 1 || true)
               # How many defects the branch holds verified fixes for, off the driver's last round.
-              VERIFIED=$(jq -s '[.[] | select(.subtype == "predictable_fix_round")] | last | (.verified // []) | length' \
-                "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null || echo 0)
+              # Each line read on its own (`fromjson?`): the driver's stream ends with its closing summary
+              # in prose, and a slurp of the whole file failed on it, read 0, and a batch that verified
+              # every defect opened no pull request.
+              VERIFIED=$(jq -cR 'fromjson? | objects | select(.subtype == "predictable_fix_round")' \
+                "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null \
+                | jq -s 'last | (.verified // []) | length' 2>/dev/null | tr -cd '0-9' || true)
+              VERIFIED=${VERIFIED:-0}
               # NOTHING VERIFIED, NOTHING PROPOSED. MEASURED on staging (2026-10-20): a batch that
               # verified 0 of 27 opened draft #3 with no changed file, and the Control Center offered
               # it for review and merge. The branch is pushed only when it holds a verified commit or
@@ -4053,7 +4081,7 @@ jobs:
             # `RESULT: not fixed — why`), quoted beside the run's verdict. Only ever quoted: the
             # verdict is this run's own re-analysis, never the agent's word.
             agent_result() {
-              jq -r 'select(.type == "result") | .result // empty' \
+              jq -rR 'fromjson? | objects | select(.type == "result") | .result // empty' \
                 "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null \
                 | grep -E '^[[:space:]]*RESULT:' | tail -n 1 | sed 's/^[[:space:]]*//' || true
             }
@@ -4075,15 +4103,15 @@ jobs:
             # `continue` or `failed`. Read, never trusted alone: a `fixed` is still verified below.
             FIX_OUTCOME=""
             if [ "${PC_COMMAND}" = "fix-agent" ]; then
-              FIX_OUTCOME=$(jq -r 'select(.type == "result") | .predictable_fix.outcome // empty' \
+              FIX_OUTCOME=$(jq -rR 'fromjson? | objects | select(.type == "result") | .predictable_fix.outcome // empty' \
                 "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null | tail -n 1 || true)
               # No result line, but the Run step found the last round verified (see there).
               if [ -z "$FIX_OUTCOME" ] && [ "${PC_FIX_VERIFIED_DESPITE_EXIT:-}" = "yes" ]; then
                 FIX_OUTCOME=fixed
               fi
-              FIX_REASON=$(jq -r 'select(.type == "result") | .predictable_fix.reason // empty' \
+              FIX_REASON=$(jq -rR 'fromjson? | objects | select(.type == "result") | .predictable_fix.reason // empty' \
                 "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null | tail -n 1 || true)
-              FIX_ROUNDS=$(jq -r 'select(.type == "result") | .predictable_fix.rounds // empty' \
+              FIX_ROUNDS=$(jq -rR 'fromjson? | objects | select(.type == "result") | .predictable_fix.rounds // empty' \
                 "${RUNNER_TEMP}/predictable-agent.ndjson" 2>/dev/null | tail -n 1 || true)
               # A RUN THAT ENDED BEFORE THE AGENT HAD A TURN says its own reason: "the agent changed no
               # source, so it is still reported" was printed over a defect the analysis could not see.
@@ -4119,7 +4147,10 @@ jobs:
               [ "${PC_COMMAND}" = "fix-agent" ] \
                 && not_fixed "The agent changed no source, so the defect \`${PC_TARGET}\` is still reported."
               echo "::notice::the fix did not change any source; nothing to propose"
-              echo "No change was kept. \`fix-issue\` restores its snapshot when its accept gates do not hold, so this finding needs a different remedy." >> "$GITHUB_STEP_SUMMARY"
+              NOT_KEPT="No change was kept. \`fix-issue\` restores its snapshot when its accept gates do not hold, so this finding needs a different remedy."
+              [ "${PC_COMMAND}" = "autofix" ] \
+                && NOT_KEPT="No autofix was kept: \`predictable autofix\` puts every file back when a fix's re-analysis still reports its defect or the build gains an error, and its result line above names which step refused each."
+              echo "$NOT_KEPT" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
 
@@ -4133,6 +4164,11 @@ jobs:
             else
               MADE_BY="\`predictable analyze fix-issue\`"
               HOW="**This is not an agent's work.** \`predictable analyze fix-issue\` edits narrowly and keeps the edit only if its own accept gates hold, so what is here was re-checked before it was proposed. It is still a change to your source, and it is here to be reviewed."
+            fi
+            # AUTOFIX (#2585) is the program's too, and says which program and what it re-checked.
+            if [ "${PC_COMMAND}" = "autofix" ]; then
+              MADE_BY="\`predictable autofix\`, which applies the edits the analysis decided, with no model"
+              HOW="**This is not an agent's work.** \`predictable autofix\` applies the edit the analysis recorded for each defect and keeps it only when its own re-analysis no longer reports the defect and the build gained no error, so every edit here was re-checked before it was proposed. It is still a change to your source, and it is here to be reviewed."
             fi
             # WHAT THIS ATTEMPT CHANGED, read from the index before it is committed, for the fix
             # branch's `.analysis.json` (#2240): the Control Center holds no tree, so this is the
@@ -4239,7 +4275,11 @@ jobs:
               } > /tmp/pc-fix-body.md
               # BASED ON THE BRANCH THIS RAN ON (`open_pull_request` sends `${GITHUB_REF_NAME}`),
               # which is the one the fix branch was cut from.
-              open_pull_request "$BRANCH" "Predictable Code fix: ${PC_TARGET}" /tmp/pc-fix-body.md
+              if [ "${PC_COMMAND}" = "autofix" ]; then
+                open_pull_request "$BRANCH" "Predictable Code autofix (${PC_TARGET})" /tmp/pc-fix-body.md
+              else
+                open_pull_request "$BRANCH" "Predictable Code fix: ${PC_TARGET}" /tmp/pc-fix-body.md
+              fi
             fi
             # THE DETERMINISTIC FIX ENDS HERE: it is one pass, and its own accept gates already
             # re-checked it before it was kept.
