@@ -229,6 +229,28 @@ in step 1** (same background call, same short progress notes) and report the new
 verdict — did the issue you fixed disappear, and did anything else change? Editing
 does not auto-run a check; you drive it.
 
+### 3. Tests that check high-level requirements (#2773)
+
+A requirement no single function states — "a user who cancels is never charged again" — is
+reported **informal** (or **untested**): nothing the analysis reads can decide it. It is checked by a
+test in the project's own suite **linked** to it, and every `predictable sync` then runs exactly
+that test (never the whole suite): passed → the requirement reads **tested**, failed → **violated**.
+
+Whenever you write or find a test that checks a spec's requirement, link it:
+
+```bash
+predictable specs requirements link-test <spec-id> <req-id> <test file from the project root> "<test name>"
+```
+
+The test name is what its runner selects it by: the title (vitest / jest / mocha / `node --test`),
+`package.Class#method` (JUnit), `Namespace.Class.Method` (.NET), `Class::test` (pytest),
+`module::test` (cargo); a Lean test is its file. `predictable specs requirements tests --owed` lists
+the requirements still owed a test and the links gone stale (the requirement's sentence or the test
+changed since it was linked); relink one only after checking the test still checks the requirement.
+
+**A linked test that fails while its requirement is unchanged has found a defect in the code. Fix
+the code — never weaken, skip or delete the test to make it pass.**
+
 ## Interpreting the verdict
 
 The verdict is `.result | keys[0]` of the envelope (see step 3; `jq '(.result // .)
