@@ -11,7 +11,7 @@
     "sha": null,
     "body": "Read this repository — its structure, languages, specs, open issues and the defects Predictable Code reports — and suggest a crew of agents specialised on it, at most 8. For each, give a short name, its purpose in one sentence, WHY this repository needs it (name the files, directories or areas that motivated it), the instructions it should run with, the model it needs (`claude-opus-5-5` for hard reasoning, `claude-sonnet-5-5` for most work, `claude-haiku-5-5` for routine work) the duties it should hold (maintain, readable-specs, spec-areas, mergeable, report-mistakes, requirement-tests), and the GitHub events it should react to as an object keyed by event (issue-opened, issue-comment, pull-request-opened, pull-request-comment, pull-request-merged, push, ci-failed), each with its own `instructions` and, where it should react only to some, `labels` (labels this repository uses) and `authors`. Do not suggest an agent that only repeats the Maintainer. Write them as a JSON array to a file and record it with `predictable agent suggest --file <that file>`. Change nothing in the repository and propose nothing."
   },
-  "state": "running",
+  "state": "acted",
   "reason": null,
   "instructions": {
     "agent": "Keep this repository documented, specified and free of defects. React to the event: say what you noticed and what you are about to do, then do it — comment, label, propose a pull request with documentation, specs or a verified fix, or push to the pull request under review — using Predictable Code to analyse, specify and verify. Change a spec only through its verbs, never by editing a .spec.md file: a new one with `predictable specs new`, its description with `predictable specs describe <spec id> --text \"<the whole new description>\"` (which derives its requirements again), a requirement with `predictable specs requirements add|update|remove`. Inside this run `specs describe` is queued: the run applies it after your session ends, before it proposes, onto the proposal you record next with `predictable agent propose` (onto one of its own when you propose none), so still add the tests that cover the new description to that proposal. Every behaviour a spec you propose states must be covered by a test, one you add or one that exists, and checked with `predictable sync` before you propose it. Your request lists this repository's open pull requests from your earlier runs, with the files each changes: when your change touches a file one of them also changes, propose it with `--stack-on <its number>` so it stacks on it, or say plainly in your reply that the two will conflict; never say two proposals are independent unless that list shows they share no file. Never merge. You are Maintainer, one agent of this repository's crew; `predictable agent peers` lists the other agents working now and `predictable agent send --to <name> \"<text>\"` messages one (an agent with no live session is woken by it).",
@@ -65,18 +65,24 @@
       "verb": "Ran",
       "detail": "mkdir -p /tmp/crew && cat > tmp/crew/crew.json <<'EOF'",
       "tool": "toolu_01DyDrcABLDRjAJob3UwdgTx"
+    },
+    {
+      "at": "2026-11-20T16:23:22.774Z",
+      "verb": "Ran",
+      "detail": "cat > tmp/tmp.XXnh7IE3/reply.json <<'EOF'",
+      "tool": "toolu_016q7MqcxtkECDqWAUvLawPm"
     }
   ],
   "messages": [],
   "actions": [],
-  "title": null,
-  "summary": null,
-  "runUrl": null,
+  "title": "Suggested a crew of 5",
+  "summary": "Recorded crew: HookSmith (hooks/tests), PrivacyWarden (no-source/manifest), RuntimeKeeper (bootstrap/kit), DocScribe (README/skill), SpecWright (hook specs + test links).",
+  "runUrl": "https://github.com/predictable-machines/predictable-code-claude/actions/runs/44772459611",
   "ranAs": {
     "id": "maintainer",
     "name": "Maintainer",
     "model": null
   },
   "startedAt": "2026-11-20T16:20:48.081Z",
-  "updatedAt": "2026-11-20T16:23:20.728Z"
+  "updatedAt": "2026-11-20T16:23:33.408Z"
 }
