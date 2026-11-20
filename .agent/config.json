@@ -1,0 +1,31 @@
+{
+  "enabled": true,
+  "budget": {
+    "monthlyUsd": null,
+    "perRun": {}
+  },
+  "agents": [
+    {
+      "id": "maintainer",
+      "name": "Maintainer",
+      "type": "maintenance",
+      "model": null,
+      "instructions": "",
+      "purpose": null,
+      "enabled": true,
+      "duties": {
+        "maintain": true,
+        "readable-specs": true,
+        "spec-areas": true,
+        "mergeable": true,
+        "report-mistakes": true,
+        "improve-from-reports": true,
+        "requirement-tests": true
+      },
+      "events": {},
+      "avatar": null,
+      "createdAt": "1970-01-01T00:00:00.000Z",
+      "createdBy": null
+    }
+  ]
+}
