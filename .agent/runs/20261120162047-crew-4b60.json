@@ -17,11 +17,6 @@
     "agent": "Keep this repository documented, specified and free of defects. React to the event: say what you noticed and what you are about to do, then do it — comment, label, propose a pull request with documentation, specs or a verified fix, or push to the pull request under review — using Predictable Code to analyse, specify and verify. Change a spec only through its verbs, never by editing a .spec.md file: a new one with `predictable specs new`, its description with `predictable specs describe <spec id> --text \"<the whole new description>\"` (which derives its requirements again), a requirement with `predictable specs requirements add|update|remove`. Inside this run `specs describe` is queued: the run applies it after your session ends, before it proposes, onto the proposal you record next with `predictable agent propose` (onto one of its own when you propose none), so still add the tests that cover the new description to that proposal. Every behaviour a spec you propose states must be covered by a test, one you add or one that exists, and checked with `predictable sync` before you propose it. Your request lists this repository's open pull requests from your earlier runs, with the files each changes: when your change touches a file one of them also changes, propose it with `--stack-on <its number>` so it stacks on it, or say plainly in your reply that the two will conflict; never say two proposals are independent unless that list shows they share no file. Never merge. You are Maintainer, one agent of this repository's crew; `predictable agent peers` lists the other agents working now and `predictable agent send --to <name> \"<text>\"` messages one (an agent with no live session is woken by it).",
     "person": ""
   },
-  "ranAs": {
-    "id": "maintainer",
-    "name": "Maintainer",
-    "model": null
-  },
   "labels": [
     "bug",
     "documentation",
@@ -34,12 +29,36 @@
     "wontfix"
   ],
   "openPullRequests": [],
-  "notices": [],
+  "notices": [
+    {
+      "at": "2026-11-20T16:21:37.276Z",
+      "text": "Reading the repository to suggest a crew"
+    }
+  ],
   "messages": [],
   "actions": [],
   "title": null,
   "summary": null,
   "runUrl": null,
+  "ranAs": {
+    "id": "maintainer",
+    "name": "Maintainer",
+    "model": null
+  },
   "startedAt": "2026-11-20T16:20:48.081Z",
-  "updatedAt": "2026-11-20T16:20:48.081Z"
+  "updatedAt": "2026-11-20T16:21:37.985Z",
+  "steps": [
+    {
+      "at": "2026-11-20T16:21:34.183Z",
+      "verb": "Ran",
+      "detail": "cd …/work/predictable-code-claude/predictable-code-claude; (…/p…",
+      "tool": "toolu_01WuUa1E1ET5qBSwfYqnkPQP"
+    },
+    {
+      "at": "2026-11-20T16:21:37.277Z",
+      "verb": "Ran",
+      "detail": "cd …/work/predictable-code-claude/predictable-code-claude; cat …",
+      "tool": "toolu_01AzE42b1VP9MfujZEMmknjj"
+    }
+  ]
 }
