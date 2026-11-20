@@ -8,8 +8,12 @@
 #
 # WHAT IT NEEDS FROM US. Only a download. The CLI lives in a private repository, so the
 # job proves who it is with the OIDC token GitHub mints for it and receives a
-# short-lived, pre-signed URL in return. No secret is stored in this repository, none
-# is configured, and no credential of ours ever reaches this runner.
+# short-lived, pre-signed URL in return. No secret is stored in this repository and none
+# is configured. The only credentials of ours this runner is handed are tokens Predictable's
+# GitHub App mints for an hour, `contents: write` alone: one for THIS repository, with which
+# it pushes the branches of the pull requests it proposes — so your own CI runs on them as on
+# a person's push, instead of waiting for your approval — and, for an organisation agent's
+# session, one for the repositories it watches.
 #
 # WHAT IT WRITES. Everything Predictable keeps lives on ONE branch of its own,
 # `predictable-code-database`, which `predictable` checks out at `.predictable-code/` and commits
@@ -31,8 +35,11 @@
 # The stamp below is how the Control Center knows whether this repository is running a
 # current copy. It is compared as a NUMBER, never as a diff, so your own edits to this
 # file — a bigger `runner:`, a different `heap_mb` — are yours and are left alone.
-# predictable-workflow-version: 89
+# predictable-workflow-version: 94
 name: Predictable Code
+# EACH RUN NAMES ITS TARGET (v94, #2917), so the Control Center finds the run a dispatch started
+# among several started together — a crew's agents dispatch side by side (`RUN_TITLE_PREFIX`).
+run-name: ${{ format('Predictable Code · {0} · {1}', inputs.command || 'sync', inputs.target || '-') }}
 
 on:
   workflow_dispatch:
@@ -81,7 +88,8 @@ on:
         # areas mode the repository agent's duties ask for (#2629): `with`, `without` or `only`.
         #
         # `spec-implement` (#2339) IMPLEMENTS a spec: an agent changes the code until this run's own
-        # analysis verifies every requirement of the spec and reports no finding the project did not
+        # analysis verifies every requirement of the spec, or its linked tests pass for a claim the IL
+        # cannot decide (#2904), and reports no finding the project did not
         # have at the start (`predictable implement`, gated by `predictable spec-check`). It runs on
         # the spec's own branch while its pull request is open, so the spec and the code that meets
         # it are ONE pull request — a draft until the gate is met. It needs the key like a fix.
@@ -228,8 +236,14 @@ permissions:
 # hazard, and so is a fix beside a sync — the fix's own edits leave a sync running as it
 # settles, which is why the desktop product refuses the same pair. The group deliberately
 # does NOT include the command, or a fix and a sync would be allowed to overlap.
+#
+# AGENT SESSIONS RUN SIDE BY SIDE (v94, #2917): a repository's agents are a crew that works at the
+# same time, each on a runner of its own that proposes on a branch of its own (its record is the
+# plane's to write); one shared slot made them wait in line, and GitHub cancels an older WAITING run when a
+# newer one queues, so a third agent cancelled the one queued before it. The `agent` verb's group is
+# its own run's target; every other verb keeps the branch's one slot.
 concurrency:
-  group: predictable-${{ github.ref }}
+  group: ${{ inputs.command == 'agent' && format('predictable-agent-{0}', inputs.target) || format('predictable-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:
@@ -1569,7 +1583,9 @@ jobs:
           # THE JOB'S WRITE TOKEN, FOR THE AGENT VERB ONLY (v78): the loop beside the agent's session
           # pushes each proposal and opens its pull request as soon as the session records it, so a
           # session the job's time cuts short has still opened what it proposed. Unset in the
-          # session's own environment (below); `''` for every other verb.
+          # session's own environment (below); `''` for every other verb. Since v90 (#2546) the push
+          # itself carries the plane's push token over it (`push_or_explain`); this one is `gh`'s, and
+          # the push's fallback when the plane gives none.
           PC_AGENT_PUSH_TOKEN: ${{ inputs.command == 'agent' && github.token || '' }}
         run: |
           set -euo pipefail
@@ -1626,10 +1642,28 @@ jobs:
           # rebasing the results onto the moved tip would make the analysis describe a
           # commit its branch is not based on, and that is a product decision rather
           # than a repair.
+          #
+          # AND EVERY PUSH IS MADE WITH THE PUSH TOKEN (v90, #2546), so the project's own CI runs on it.
+          # A push made with this job's `GITHUB_TOKEN` is `github-actions[bot]`'s, and GitHub holds every
+          # `pull_request` run it starts as `action_required` until a person approves it: on Bridge the
+          # project's CI never ran on the pull request Predictable opened to implement a spec. The plane
+          # mints an App installation token for THIS repository alone (`pc_push_token`), and this push
+          # carries it as its ONLY `Authorization` (`pc_push_credentials`). Without one the push falls
+          # back to whatever credential the caller holds (the job's token) and SAYS what that costs.
           push_or_explain() {
+            PC_PUSH_HEADER=""
+            # `PC_PUSH_HELD` is about the LAST head pushed, which is what a pull request's checks run on.
+            if pc_push_token; then
+              PC_PUSH_HELD=""
+              PC_PUSH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PC_PUSH_TOKEN" | base64 | tr -d '\n')"
+            else
+              PC_PUSH_HELD=yes
+              echo "::warning::Predictable Code gave this run no push token, so ${BRANCH} is pushed with the workflow's own token: GitHub holds the project's CI on a pull request pushed that way until someone with write access approves the run"
+            fi
             # Extra push flags, if any, come first: only the authored-spec and fix paths pass one
-            # (`--force-with-lease`, below); every other caller pushes exactly as before.
-            if git push "$@" origin "$BRANCH" 2> "${RUNNER_TEMP}/pc-push.err"; then
+            # (`--force-with-lease`, below); every other caller pushes exactly as before. In a
+            # subshell, so the credential is exported to this one `git` alone.
+            if ( pc_push_credentials; git push "$@" origin "$BRANCH" ) 2> "${RUNNER_TEMP}/pc-push.err"; then
               cat "${RUNNER_TEMP}/pc-push.err" >&2
               return 0
             fi
@@ -1812,6 +1846,62 @@ jobs:
             fi
             jq -nc --arg number "$PC_AP_NUMBER" --arg url "$PC_AP_URL" --arg title "$2" --arg branch "$BRANCH" \
               '{number: ($number | tonumber), url: $url, title: $title, branch: $branch}' >> "$4"
+          }
+
+          # THE PUSH TOKEN (v90, #2546): minted by the plane for THIS repository alone and
+          # `contents: write`, asked with this job's OIDC token on the organisation token's route
+          # (`{scope: "repository"}`). Asked on the first push and again past fifty minutes (GitHub's
+          # installation token lives an hour); a refusal is remembered, so a run that cannot get one
+          # asks once and every push falls back. Held in this shell's `PC_PUSH_TOKEN`, never exported,
+          # never in a checkout's configuration and never in a session's environment.
+          pc_push_token() {
+            [ "${PC_PUSH_TOKEN_REFUSED:-}" != yes ] || return 1
+            if [ -n "${PC_PUSH_TOKEN:-}" ] && [ $(( $(date +%s) - ${PC_PUSH_TOKEN_AT:-0} )) -lt 3000 ]; then
+              return 0
+            fi
+            PC_PUSH_TOKEN=""
+            PC_PUSH_TOKEN_REFUSED=yes
+            [ -n "${CONTROL_PLANE:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || return 1
+            PC_PUSH_OIDC=$(curl -sS -m 20 \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${CONTROL_PLANE}" \
+              | jq -r '.value // empty') || return 1
+            [ -n "$PC_PUSH_OIDC" ] || return 1
+            PC_PUSH_TOKEN=$(printf '%s' '{"scope":"repository"}' \
+              | curl -sS -m 30 -X POST -H "Authorization: Bearer ${PC_PUSH_OIDC}" \
+                  -H 'content-type: application/json' --data-binary @- \
+                  "${CONTROL_PLANE}/api/cloud/org-token" | jq -r '.token // empty') || PC_PUSH_TOKEN=""
+            [ -n "$PC_PUSH_TOKEN" ] || return 1
+            PC_PUSH_TOKEN_REFUSED=""
+            PC_PUSH_TOKEN_AT=$(date +%s)
+          }
+          # The push token's header as the ONLY `Authorization` git sends, exported in the caller's
+          # subshell. TWO entries: an empty `extraheader` first RESETS the list — the one
+          # `actions/checkout` persisted into this checkout, or a caller's `GIT_CONFIG_*` — since git
+          # sends every value it holds, and a second `Authorization` is refused by GitHub as a
+          # duplicate header. Nothing when there is no push token: the caller's credential stands.
+          pc_push_credentials() {
+            [ -n "${PC_PUSH_HEADER:-}" ] || return 0
+            export GIT_CONFIG_COUNT=2 \
+              GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="" \
+              GIT_CONFIG_KEY_1="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_1="$PC_PUSH_HEADER"
+          }
+          # MARK A PULL REQUEST READY FOR REVIEW (#2546), and never silently over a head whose CI is held.
+          # Whether the project's checks PASSED is the plane's to say (the Pull requests screen, from
+          # the head's own checks); what this run knows is whether it pushed that head without the
+          # push token — the one way its own push leaves the project's CI waiting for approval — and
+          # then it says so on the pull request, in the run's annotations and in its summary.
+          pc_mark_ready() {
+            if ! gh pr ready "$1" >/dev/null 2>&1; then
+              echo "::warning::could not mark $1 ready for review"
+              return 0
+            fi
+            [ "${PC_PUSH_HELD:-}" = yes ] || return 0
+            PC_HELD_NOTE="This run pushed the branch with the workflow's own token, because Predictable Code gave it no push token, so GitHub holds this project's CI on the latest commit until someone with write access approves the run (Approve and run, on the Checks tab). It is marked ready for review with those checks not yet run."
+            echo "::warning::$1 is marked ready for review while the project's CI on its latest commit waits for approval"
+            printf '%s\n' "$PC_HELD_NOTE" >> "$GITHUB_STEP_SUMMARY"
+            gh pr comment "$1" --body "$PC_HELD_NOTE" >/dev/null 2>&1 \
+              || echo "::warning::could not say on $1 that its CI waits for approval"
           }
 
           # AN ORGANISATION SESSION'S TOKEN (v83, #2691): minted by the plane for THIS run, scoped to
@@ -2002,7 +2092,7 @@ jobs:
               -H "Authorization: Bearer ${PC_OIDC}" \
               -H 'content-type: text/plain' \
               --data-binary "@${RUNNER_TEMP}/pc-batch.ndjson" \
-              "${CONTROL_PLANE}/api/cloud/progress?stream=${_stream}${PC_STEER_ACK:+&steered=${PC_STEER_ACK}}"; then
+              "${CONTROL_PLANE}/api/cloud/progress?stream=${_stream}${PC_TARGET:+&target=${PC_TARGET}}${PC_STEER_ACK:+&steered=${PC_STEER_ACK}}"; then
               if jq -e '.following == true' "${RUNNER_TEMP}/pc-push-answer.json" > /dev/null 2>&1; then
                 PUSH_SENT=$total
                 PUSH_FOLLOWED=1
@@ -2022,6 +2112,14 @@ jobs:
                     PC_STEER_ACK="${PC_STEER_ACK:+${PC_STEER_ACK},}${PC_STEER_ID}"
                   done < "${RUNNER_TEMP}/pc-steer-new.ndjson"
                   rm -f "${RUNNER_TEMP}/pc-steer-new.ndjson"
+                  # THE OTHER AGENTS WORKING NOW (v94, #2917): appended to the steer file when they
+                  # changed, where `predictable agent run` keeps them for `predictable agent peers`.
+                  PC_PEERS_NOW=$(jq -c 'select(.peers | type == "array") | {peers}' \
+                    "${RUNNER_TEMP}/pc-push-answer.json" 2>/dev/null || :)
+                  if [ -n "$PC_PEERS_NOW" ] && [ "$PC_PEERS_NOW" != "${PC_PEERS_LAST:-}" ]; then
+                    printf '%s\n' "$PC_PEERS_NOW" >> "$PC_STEER_FILE"
+                    PC_PEERS_LAST="$PC_PEERS_NOW"
+                  fi
                 fi
               elif jq -e '.following == false' "${RUNNER_TEMP}/pc-push-answer.json" > /dev/null 2>&1; then
                 PUSH_REFUSED=1
@@ -2078,7 +2176,9 @@ jobs:
           #
           # THE CREDENTIAL lives in this shell alone: the job's token (`PC_AGENT_PUSH_TOKEN`) is unset
           # in the session's environment, and it reaches git only through `GIT_CONFIG_*` on the push
-          # itself — never the checkout's configuration, which the session reads. The session runs as
+          # itself — never the checkout's configuration, which the session reads. The push itself
+          # carries the plane's push token when there is one (`push_or_explain`, v90, #2546), so the
+          # project's CI runs on the proposal; the job's token is the fallback and `gh`'s. The session runs as
           # this uid, so it could read this shell's environment; that is the exposure the OIDC request
           # token the progress pushes above use already has, and this token is scoped to this
           # repository and expires with the job.
@@ -2558,7 +2658,7 @@ jobs:
             fi
             (
               unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_RUNTIME_TOKEN \
-                PC_AGENT_PUSH_TOKEN GH_TOKEN PC_ORG_TOKEN
+                PC_AGENT_PUSH_TOKEN GH_TOKEN PC_ORG_TOKEN PC_PUSH_TOKEN PC_PUSH_HEADER
               predictable agent run "${PC_ORG_ARGS[@]}" \
                 --request "$AGENT_REQUEST" \
                 --pinned \
@@ -3529,16 +3629,40 @@ jobs:
           # thousand per-file reasons is one nobody reads, and the count says how many
           # were left for the log.
           if [ "${RESULT}" = "degraded" ] && [ "${HEAP_EXPLAINED}" = "no" ]; then
+            # THE REASONS ARE THE RESULT'S OWN: `.result.degraded.notTranslated` names every file
+            # the run did not translate with the engine's reason, whatever its language or wording
+            # (a Lean file's is `not lowered to the IL (…)`, which no grep of the progress stream for
+            # `not translated (` ever found, so a Lean front end that did not build read as "no
+            # reason"). The progress stream is read only when the result carries none. One reason
+            # per line, two tab-separated fields: a newline or tab in a path or a reason would
+            # split a row or shift its columns.
+            NT_ROWS=$(jq -r '.result.degraded.notTranslated[]?
+                | "\((.file // "?") | gsub("[\t\r\n]+"; " "))\t\((.reason // "no reason recorded") | gsub("[\t\r\n]+"; " "))"' \
+              "${RESULT_JSON:-}" 2>/dev/null || true)
+            if [ -n "${NT_ROWS}" ]; then
+              ALL_REASONS=$(printf '%s\n' "${NT_ROWS}" | cut -f2-)
+            else
+              ALL_REASONS=$(grep -o "not translated ([^)\\\"]*)" "$RUN_JSON" 2>/dev/null || true)
+            fi
             # `sed -n '1,5p'` reads to the end, so `sort` is never cut off mid-write: a `head`
             # here is the early-exiting reader the push loop above explains.
-            REASONS=$(grep -o "not translated ([^)\\\"]*)" "$RUN_JSON" 2>/dev/null \
-              | sort | uniq -c | sort -rn | sed -n '1,5p' || true)
-            DISTINCT=$(grep -o "not translated ([^)\\\"]*)" "$RUN_JSON" 2>/dev/null \
-              | sort -u | wc -l | tr -d ' ' || true)
+            REASONS=""
+            DISTINCT=0
+            if [ -n "${ALL_REASONS}" ]; then
+              REASONS=$(printf '%s\n' "${ALL_REASONS}" | sort | uniq -c | sort -rn | sed -n '1,5p' || true)
+              DISTINCT=$(printf '%s\n' "${ALL_REASONS}" | sort -u | wc -l | tr -d ' ' || true)
+            fi
+            # EVERY FILE, IN THIS JOB'S LOG: the files the run left out stay on the runner, which
+            # keeps nothing, so the log is where a reader finds each one and why.
+            if [ -n "${NT_ROWS}" ]; then
+              echo "::group::Files not translated ($(printf '%s\n' "${NT_ROWS}" | wc -l | tr -d ' '))"
+              printf '%s\n' "${NT_ROWS}" | awk -F'\t' '{ print $1 ": " $2 }'
+              echo "::endgroup::"
+            fi
             if [ -n "${REASONS}" ]; then
               printf 'What the engine reported, most common first:\n\n```\n%s\n```\n' "${REASONS}" > "$WHY_FILE"
             else
-              printf 'This run recorded no per-file reason that could be read back. The job log holds the full phase output, and `Code/.il/.report.json` names every file that did not translate.\n' > "$WHY_FILE"
+              printf 'This run recorded no per-file reason that could be read back. The job log holds the full phase output.\n' > "$WHY_FILE"
             fi
             echo "::warning::this analysis covers less than the project (verdict: degraded) — see the job summary for what did not translate"
             {
@@ -3554,10 +3678,14 @@ jobs:
                 echo '```'
                 if [ "${DISTINCT:-0}" -gt 5 ]; then
                   echo
-                  echo "That is the 5 most common of **${DISTINCT}** distinct reasons; this job's log holds them all, and so does \`Code/.il/.report.json\` in the results."
+                  echo "That is the 5 most common of **${DISTINCT}** distinct reasons."
+                fi
+                if [ -n "${NT_ROWS}" ]; then
+                  echo
+                  echo "This job's log lists every file that did not translate, with its reason, under **Files not translated**."
                 fi
               else
-                echo "This run recorded no per-file reason that could be read back here. The phase output in this job's log is the full account, and \`Code/.il/.report.json\` in the results names every file that did not translate."
+                echo "This run recorded no per-file reason that could be read back here. The phase output in this job's log is the full account."
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -3860,7 +3988,8 @@ jobs:
             : > "${RUNNER_TEMP}/pc-agent-pushed.ndjson"
             : > "${RUNNER_TEMP}/pc-agent-notes.txt"
             # The Run step removed the checkout's write token before the agent's session; this step
-            # pushes with its OWN, set here, after the session has ended.
+            # reads and falls back with its OWN, set here, after the session has ended. Each push
+            # carries the plane's push token over it (`push_or_explain`, v90, #2546).
             git config --local "http.https://github.com/.extraheader" \
               "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
             PROPOSALS=$(jq -r '.proposals | length' "$AGENT_FILE" | tr -cd '0-9')
@@ -3977,12 +4106,16 @@ jobs:
               '($agent[0]) as $a |
                ([$a.refused[]?] + ($notes | split("\n") | map(select(. != "")))) as $left |
                {run: $run, result: {
-                 outcome: (if $a.outcome == "acted" and ($a.comments | length) == 0 and ($a.labels | length) == 0 and (($a.issues // []) | length) == 0 and (($a.engineReports // []) | length) == 0 and ($opened | length) == 0 and ($pushed | length) == 0 then "nothing" else $a.outcome end),
+                 outcome: (if $a.outcome == "acted" and ($a.comments | length) == 0 and ($a.labels | length) == 0 and (($a.issues // []) | length) == 0 and (($a.engineReports // []) | length) == 0 and ($opened | length) == 0 and ($pushed | length) == 0 and ($a.avatarSvg == null) and (($a.crew // []) | length) == 0 then "nothing" else $a.outcome end),
                  title: ($a.title // null),
                  summary: ($a.summary // ""),
                  reason: (if ($left | length) > 0 then ((if $a.reason then $a.reason + "; " else "" end) + "left out: " + ($left | join("; "))) else $a.reason end),
                  comments: $a.comments, labels: $a.labels, issues: ($a.issues // []),
                  engineReports: ($a.engineReports // []),
+                 # THE CREW SESSIONS (v94, #2917): a drawing an agent made of itself, and a crew
+                 # suggested for the repository, each held by the driver and again by the plane.
+                 avatarSvg: ($a.avatarSvg // null),
+                 crew: ($a.crew // []),
                  timedOut: ($a.timedOut // false),
                  pullRequests: $opened, pushes: $pushed}}' \
               > "${RUNNER_TEMP}/pc-agent-report.json"
@@ -4336,12 +4469,17 @@ jobs:
               fi
               # WHAT THE GATE SAID, as the reader sees it. The requirement sentences are the spec's
               # own (a model may have written them), so each is set INERT, like every model text here.
+              # A row whose subject the analysis did not find (`missing`, F-052) owes code, not a test:
+              # it is "not found", never a claim without a test (`Pending.owesTest`, one rule).
               jq -r 'def inert: tostring | gsub("[[:cntrl:]]+"; " ") | gsub("`+"; "`") | "`` " + . + " ``";
                 (.last // {}) as $c |
-                "Requirements verified: **\($c.verified // 0) of \($c.total // 0)** · findings at the start \($c.findingsBefore // "?"), now \($c.findingsNow // "?") · rounds: \(.rounds // 0)",
+                "Requirements verified: **\($c.verified // 0)\(if ($c.tested // 0) > 0 then "**, tested by their linked tests: **\($c.tested)" else "" end) of \($c.total // 0)** · findings at the start \($c.findingsBefore // "?"), now \($c.findingsNow // "?") · rounds: \(.rounds // 0)",
                 "",
                 "The verdict: \(.reason | inert)",
-                (if (($c.pending // []) | length) > 0 then "", "### Not verified yet", "", ($c.pending[] | "- `\(.reqId)` (\(.status)) — \(.description | inert)") else empty end),
+                (($c.pending // []) | map(select((.status == "informal" or .status == "untested") and .missing == null))) as $owed |
+                (($c.pending // []) | map(select((.status != "informal" and .status != "untested") or .missing != null))) as $unverified |
+                (if ($unverified | length) > 0 then "", "### Not verified yet", "", ($unverified[] | "- `\(.reqId)` (\(if .missing != null then "not found: \(.missing | inert)" else .status end)) — \(.description | inert)") else empty end),
+                (if ($owed | length) > 0 then "", "### Claims without a test", "", ($owed[] | "- `\(.reqId)` (\(if .status == "untested" then "its linked test has not passed on this tree" else "no linked test" end)) — \(.description | inert)") else empty end),
                 (if (($c.introduced // []) | length) > 0 then "", "### Findings the change added", "", ($c.introduced[:50][] | "- \(. | inert)") else empty end),
                 "",
                 (if has("testsChanged") | not then empty elif (.testsChanged | length) > 0 then "Tests added or changed: " + ((.testsChanged[:50]) | map(inert) | join(", ")) else "**No test was added or changed by this run.** None of the project tests exercises what it wrote." end)' \
@@ -4350,7 +4488,7 @@ jobs:
                 echo "**Implementing spec \`${SPEC_ID:-?}\`** · \`${SPEC_FILE}\`"
                 echo
                 if [ "$OUTCOME" = "met" ]; then
-                  echo "**The analysis verifies every requirement of this spec, and the change added no finding.** An agent wrote the code with this repository's own key, in its own Actions (\`${TAG}\`); after each of its turns this run re-analysed the repository with \`predictable spec-check\`, and that check — not the agent — decided it was done."
+                  echo "**Every requirement of this spec is verified by the analysis or tested by its linked tests, and the change added no finding.** An agent wrote the code with this repository's own key, in its own Actions (\`${TAG}\`); after each of its turns this run re-analysed the repository with \`predictable spec-check\`, and that check — not the agent — decided it was done."
                 else
                   echo "> [!WARNING]"
                   echo "> **Not done: the analysis does not verify this spec yet**, so this pull request stays a draft. What the agent wrote is here so it is not lost; the requirements still unverified are listed below. Implement it again from the Control Center, or finish it by hand."
@@ -4400,7 +4538,7 @@ jobs:
                 gh pr edit "$EXISTING" --title "$TITLE" --body-file "${RUNNER_TEMP}/pc-implement-body.md" >/dev/null \
                   || echo "::warning::could not update ${EXISTING}'s title and description"
                 if [ "$OUTCOME" = "met" ]; then
-                  gh pr ready "$EXISTING" >/dev/null 2>&1 || echo "::warning::could not mark ${EXISTING} ready for review"
+                  pc_mark_ready "$EXISTING"
                 else
                   gh pr ready --undo "$EXISTING" >/dev/null 2>&1 || true
                 fi
@@ -4565,7 +4703,7 @@ jobs:
               # count read off the driver's last round.
               if [ -n "$OPEN" ] && { [ "$FIX_OUTCOME" = "fixed" ] \
                 || { [ "$FIX_OUTCOME" = "not-fixed" ] && [ "${VERIFIED:-0}" -gt 0 ]; }; }; then
-                gh pr ready "$OPEN" || echo "::warning::could not mark ${OPEN} ready for review"
+                pc_mark_ready "$OPEN"
               fi
               {
                 echo "### Fix all defects: ${FIX_OUTCOME:-unknown}"
