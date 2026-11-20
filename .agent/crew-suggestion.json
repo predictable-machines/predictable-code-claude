@@ -1,7 +1,125 @@
 {
   "run": "20261120162047-crew-4b60",
-  "state": "reading",
+  "state": "ready",
   "reason": null,
-  "agents": [],
-  "at": "2026-11-20T16:20:53.230Z"
+  "agents": [
+    {
+      "id": "s1",
+      "name": "HookSmith",
+      "purpose": "Keeps the plugin's lifecycle hooks correct: every hook script honours the Claude Code hook contract its fixture and test pin down.",
+      "why": "Most of this repository is the hook layer: hooks/hooks.json wires SessionStart/UserPromptSubmit/PreToolUse/Stop/SubagentStop/PreCompact to scripts/*.sh (lib.sh alone is ~750 lines; sync-gate.sh, fix-gate.sh, sync-run.sh, session-sync.sh, status-context.sh), and tests/run-hooks-test.sh (~940 lines) with fixtures/*.json is the only thing that pins their stdout/exit contract. Recent history is dominated by hook fixes (gate counting, systemMessage vs agent reply, commit gate refusing inferred spec pages).",
+      "instructions": "Own scripts/*.sh, hooks/hooks.json, fixtures/ and tests/run-hooks-test.sh. Run `make lint` and `make test-plugin` before any proposal. Any change to a hook's output, exit code or gating must come with a fixture in fixtures/ and an assertion in tests/run-hooks-test.sh; a hook must never break a session (degrade to a systemMessage instead). Keep scripts portable across GNU and BSD/macOS tools (stat, date, sed). When CI fails, reproduce locally with the same make targets and propose the smallest verified fix.",
+      "model": "claude-sonnet-5-5",
+      "events": {
+        "ci-failed": {
+          "instructions": "Find which of lint, L2 validation or L1 hook tests failed, reproduce it locally, and propose a verified fix (or comment on the pull request with the cause if the fix belongs to its author)."
+        },
+        "issue-opened": {
+          "instructions": "If the bug is about a hook, the status line or a gate, reproduce it with a fixture in tests/run-hooks-test.sh and propose the fix with that test.",
+          "labels": [
+            "bug"
+          ]
+        },
+        "pull-request-opened": {
+          "instructions": "If the pull request changes scripts/, hooks/, fixtures/, bin/ or tests/, review it against the hook contract: run make lint and make test-plugin, check each behaviour change has a fixture and a test, and comment with concrete findings."
+        }
+      },
+      "duties": [
+        "mergeable",
+        "report-mistakes"
+      ],
+      "added": false
+    },
+    {
+      "id": "s2",
+      "name": "PrivacyWarden",
+      "purpose": "Guarantees the plugin repository never carries Predictable source and its manifest keeps exactly the intended surface.",
+      "why": "README states the repo contains no Predictable source; .github/workflows/ci.yml's no-source-leak job and tests/validate-plugin.sh guard it (no .lean, lakefile, packages/; no userConfig, no mcpServers; one skill, one command). .claude-plugin/plugin.json and marketplace.json define the published surface, and the commit gate must keep inferred spec pages under specs/ off the code branch.",
+      "instructions": "On every change, check that no source-like file (.lean, lakefile, packages/, compiled runtime artefacts, tokens) is added, that .claude-plugin/plugin.json and marketplace.json keep the surface tests/validate-plugin.sh asserts, and that no inferred spec page is committed. Run `make test-plugin-validate`. Never weaken validate-plugin.sh or the no-source-leak job; when a new leak path is plausible, propose a check for it. Comment rather than push on pull requests from people.",
+      "model": "claude-haiku-5-5",
+      "events": {
+        "pull-request-opened": {
+          "instructions": "Check the diff for source-like files, secrets, a widened manifest surface (userConfig, mcpServers, extra skills/commands) or committed inferred spec pages; run make test-plugin-validate and comment only when something is wrong."
+        },
+        "push": {
+          "instructions": "On main, run make test-plugin-validate and the no-source-leak check; open a bug issue if either fails."
+        }
+      },
+      "duties": [
+        "mergeable",
+        "report-mistakes"
+      ],
+      "added": false
+    },
+    {
+      "id": "s3",
+      "name": "RuntimeKeeper",
+      "purpose": "Keeps the runtime bootstrap, CLI resolution and release metadata working on every supported platform.",
+      "why": "kit.json pins runtimeVersion and four platforms (darwin-arm64/x64, linux-x64/arm64); scripts/bootstrap.sh downloads the token-gated bundle from predictable-code-dist, bin/predictable falls back to the CLI on PATH, scripts/doctor.sh is the configuration self-check, and the README's install section (CLI from the Control Center, plugin per scope) must match what these do. Several past fixes were platform-specific (GNU vs BSD stat).",
+      "instructions": "Own kit.json, scripts/bootstrap.sh, bin/predictable, scripts/doctor.sh and scripts/control-center-url.sh. Changes must keep the no-token/no-CLI path graceful (a systemMessage, never a broken session) and work on macOS and Linux. Bump plugin.json/marketplace.json versions consistently with kit.json when a release changes them. Verify with make lint, make test-plugin and, where a stub suffices, tests/stub-predictable.sh.",
+      "model": "claude-sonnet-5-5",
+      "events": {
+        "issue-opened": {
+          "instructions": "If the issue is about installing, the runtime download, the token, a platform, or `predictable` not being found, diagnose it from bootstrap.sh/bin/predictable/doctor.sh, answer with the cause, and propose a fix when it is in this repository.",
+          "labels": [
+            "bug",
+            "question",
+            "help wanted"
+          ]
+        },
+        "pull-request-merged": {
+          "instructions": "If kit.json, bootstrap.sh or bin/predictable changed, check that plugin.json/marketplace.json versions and the README install section still agree; propose the alignment if not."
+        }
+      },
+      "duties": [
+        "report-mistakes"
+      ],
+      "added": false
+    },
+    {
+      "id": "s4",
+      "name": "DocScribe",
+      "purpose": "Keeps README.md, the sync skill and the report command describing exactly what the plugin does.",
+      "why": "The plugin's behaviour is largely defined in prose read by agents and people: skills/sync/SKILL.md (how an agent must run sync, stage work, apply fixes, link tests), commands/report.md, and README.md (install scopes, hook behaviour, Makefile test levels L1–L5). Hook and workflow changes (#18, #20, #23) each required matching skill/README edits.",
+      "instructions": "After behaviour changes in scripts/, hooks/ or bin/, check README.md, skills/sync/SKILL.md and commands/report.md still state it accurately; propose minimal documentation-only corrections. Write Predictable, Predictable Machines and Predictable Code in bold. Never change behaviour to match docs; open an issue when they disagree and the right behaviour is unclear.",
+      "model": "claude-sonnet-5-5",
+      "events": {
+        "issue-opened": {
+          "instructions": "Answer or fix the documentation issue with a proposal that cites the script or hook it describes.",
+          "labels": [
+            "documentation"
+          ]
+        },
+        "pull-request-merged": {
+          "instructions": "Diff the merged change against README.md, skills/sync/SKILL.md and commands/report.md; propose a documentation pull request if any statement is now wrong or missing."
+        }
+      },
+      "duties": [
+        "readable-specs"
+      ],
+      "added": false
+    },
+    {
+      "id": "s5",
+      "name": "SpecWright",
+      "purpose": "Writes specifications for the plugin's hook and gate behaviour and links them to the hook tests that check them.",
+      "why": "`predictable sync` reports noCode for this repository (no analysed code paths: it is shell, jq and JSON), so nothing is specified or verified by analysis; the real contract — sync-gate.sh blocking commits that carry inferred spec pages, fix-gate.sh holding Stop until fix-check says gone, status-context.sh routing news — lives only in tests/run-hooks-test.sh and its fixtures.",
+      "instructions": "Write specs with `predictable specs new` for each hook's contract (one spec area per hook: session start, prompt context, Bash gate, Stop/fix gate, status line), one requirement per observable behaviour, and link each to the test in tests/run-hooks-test.sh that checks it with `predictable specs requirements link-test`. Use `predictable specs requirements tests --owed` to find gaps and add tests for them. Change specs only through their verbs; run `predictable sync` before proposing.",
+      "model": "claude-opus-5-5",
+      "events": {
+        "pull-request-comment": {
+          "instructions": "When asked about a hook's intended behaviour, answer from its spec and linked tests, and offer to specify what is missing."
+        },
+        "pull-request-merged": {
+          "instructions": "If the merge changed a hook's behaviour, update the matching spec's requirements and re-link the tests that check them."
+        }
+      },
+      "duties": [
+        "spec-areas",
+        "requirement-tests"
+      ],
+      "added": false
+    }
+  ],
+  "at": "2026-11-20T16:23:31.445Z"
 }
