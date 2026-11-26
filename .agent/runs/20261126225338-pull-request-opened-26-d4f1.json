@@ -1,0 +1,30 @@
+{
+  "id": "20261126225338-pull-request-opened-26-d4f1",
+  "event": {
+    "kind": "pull-request-opened",
+    "number": 26,
+    "title": "An install skill: Claude installs Predictable Code through the beta's approval",
+    "author": "raulraja",
+    "url": "https://github.com/predictable-machines/predictable-code-claude/pull/26",
+    "ref": "install-guided",
+    "sha": "5e2206f7a5404bc07f77a80d1d7746b6d9b6216b",
+    "body": "Companion to predictable-machines/predictable-code#3256.\n\nA user can install this plugin first, then ask Claude to \"install Predictable Code\". The new `install` skill follows https://predictablecode.com/install.md:\n- Claude runs the one installer and shows the GitHub code the user approves in their own browser.\n- An account in the beta is installed and signed in by that single approval.\n- An account not in the beta gets the Request access link, and nothing is installed.\n\nThe skill tells Claude to:\n- ask before each command;\n- never handle a secret;\n- never pipe a download into a shell;\n- stop if the account isn't admitted.\n\nAlso in this PR:\n- `bin/predictable`, the SessionStart advisory and `doctor` point at the guide and the skill when `predictable` is missing. Before, they named Settings › Connected machines, which a newcomer can't reach before being admitted.\n- The README install section now describes the public installer.\n- `tests/validate-plugin.sh` now expects two skills (`sync` and `install`). It also checks that the install skill follows install.md and pipes nothing into a shell.\n\nMerge after #3256 is deployed, so the guide and the signing-in installer exist when this ships.\n\nVerified: `make lint` passes, `make test-plugin-validate` has 0 failures, and `make test-plugin-hooks` passes 103/103.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+    "defaultBranch": "main"
+  },
+  "state": "not-acted",
+  "reason": "Pull request opened is not an event the agent reacts to",
+  "instructions": {
+    "agent": "",
+    "person": ""
+  },
+  "labels": null,
+  "openPullRequests": null,
+  "notices": [],
+  "messages": [],
+  "actions": [],
+  "title": null,
+  "summary": null,
+  "runUrl": null,
+  "startedAt": "2026-11-26T22:53:38.113Z",
+  "updatedAt": "2026-11-26T22:53:38.113Z"
+}
