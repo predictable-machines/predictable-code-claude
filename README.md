@@ -20,12 +20,19 @@ diagnose) and returns a single verdict. No other verbs, no MCP server, and
 
 ### 1. The `predictable` CLI
 
-Install it with the command the hosted Control Center shows under
-**Settings › Connected machines**:
+Follow **https://predictablecode.com/install.md**, or install this plugin first and
+ask Claude to "install Predictable Code": its `install` skill walks through the same
+steps. The installer is one command:
 
 ```sh
-curl -fsSLO https://<control-center>/i/<code>/predictable-install.sh && bash predictable-install.sh
+curl -fsSL https://predictablecode.com/install.sh -o predictable-install.sh && bash predictable-install.sh
 ```
+
+It asks you to approve a GitHub sign-in in your browser (it prints the address and a
+code), because Predictable Code is in private beta: an account in the beta is
+installed and signed in by that one approval; one that is not is given the Request
+access link and nothing is installed. A signed-in Control Center also shows a personal
+command under **Settings › Connected machines** that skips the sign-in.
 
 It installs Predictable Code and puts `predictable` on your `PATH` (open a new
 shell, and start Claude Code from it, so the session sees it). With no runtime
