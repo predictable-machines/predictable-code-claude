@@ -59,8 +59,16 @@ if [ "$noncmd" = "0" ]; then ok "all hooks are type=command"; else bad "non-comm
 
 echo "== single skill =="
 skills=$(find "$ROOT/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-if [ "$skills" = "1" ]; then ok "exactly one skill (sync)"; else bad "expected 1 skill, found $skills"; fi
-if [ -f "$ROOT/skills/sync/SKILL.md" ]; then ok "skill is skills/sync"; else bad "skills/sync/SKILL.md missing"; fi
+if [ "$skills" = "2" ]; then ok "exactly two skills (sync, install)"; else bad "expected 2 skills, found $skills"; fi
+if [ -f "$ROOT/skills/sync/SKILL.md" ]; then ok "skill: skills/sync"; else bad "skills/sync/SKILL.md missing"; fi
+if [ -f "$ROOT/skills/install/SKILL.md" ]; then ok "skill: skills/install"; else bad "skills/install/SKILL.md missing"; fi
+# The install skill follows the public guide and never a way around the beta (#3256).
+if grep -q 'predictablecode.com/install.md' "$ROOT/skills/install/SKILL.md" 2>/dev/null \
+  && ! grep -qE 'curl [^|]*\| *(ba)?sh' "$ROOT/skills/install/SKILL.md"; then
+  ok "install skill follows install.md and pipes nothing into a shell"
+else
+  bad "install skill must follow install.md and never pipe a download into a shell"
+fi
 
 echo "== slash commands =="
 if [ -f "$ROOT/commands/report.md" ]; then ok "command: /predictable-code:report"; else bad "commands/report.md missing"; fi

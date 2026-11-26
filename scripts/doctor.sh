@@ -62,7 +62,7 @@ fi
 if "$wrapper" --version >/dev/null 2>&1; then
   ok "predictable is invokable through the wrapper"
 else
-  warn "predictable not invokable yet (no runtime bundle and no predictable on PATH — install it with the command under Settings › Connected machines in the Control Center)"
+  warn "predictable not invokable yet (no runtime bundle and no predictable on PATH — install it by following https://predictablecode.com/install.md, or ask Claude to \"install Predictable Code\")"
 fi
 
 printf '\n'

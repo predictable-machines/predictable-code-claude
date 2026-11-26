@@ -73,7 +73,7 @@ if [ -z "$token" ]; then
     pc_log SessionStart bootstrap dev-path
     exit 0
   fi
-  fail_advisory "Predictable Code: \`predictable\` is not installed — install it with the command under Settings › Connected machines in the Control Center (or set PREDICTABLE_DIST_TOKEN to fetch the runtime bundle)."
+  fail_advisory "Predictable Code: \`predictable\` is not installed. Ask me to \"install Predictable Code\" and I will guide you (it needs your approval of a GitHub sign-in, and a beta invitation), or follow https://predictablecode.com/install.md."
 fi
 
 for tool in curl tar; do
